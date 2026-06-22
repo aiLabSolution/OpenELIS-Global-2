@@ -26,7 +26,7 @@ individual MPL-licensed files, not to the whole repository.
 | OpenELIS-Global-2 (core) | DIGI-UW/OpenELIS-Global-2 | **MPL-2.0** | In repo (pinned 3.2.1.10) | The forked core; see `UPSTREAM.md`. |
 | openelisglobal-plugins | DIGI-UW/openelisglobal-plugins | **MPL-2.0** | Planned (driver home) | Per-analyzer plugin pattern. |
 | Open Integration Engine | OpenIntegrationEngine/engine | **MPL-2.0** | Optional | HL7/ASTM channel engine (Mirth 4.5.2 fork). |
-| openelis-analyzer-bridge | DIGI-UW/openelis-analyzer-bridge | **UNDECLARED** ⚠️ | **ON HOLD** | License TBD — see `docs/compliance/THIRD-PARTY-HOLDS.md`. **Do not reuse.** |
+| openelis-analyzer-bridge | DIGI-UW/openelis-analyzer-bridge | **Modified MPL-2.0** (`NOASSERTION`) ⚠️ | Reference-only — clean-room | Custom healthcare warranty/liability clauses + README "TBD" + patchy file headers; **not reused** (clean-room reimplement), so no MPL obligation is inherited. See `docs/compliance/THIRD-PARTY-HOLDS.md` HOLD-001. |
 | LabSolution analyzer bridges / site code | aiLabSolution (this org) | TBD (our choice) | Net-new | Keep separable from MPL files to preserve license flexibility. |
 
 Update this table whenever a component is added, upgraded, or its license status changes.
