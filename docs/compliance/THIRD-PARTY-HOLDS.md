@@ -2,39 +2,44 @@
 
 Components blocked from **direct reuse** pending a licensing or compliance resolution.
 A hold means: do not copy, vendor, embed, statically/dynamically link, or derive from the
-component until the hold is cleared and this file is updated. A hold may be *satisfied by
-avoidance* — i.e. resolved by deciding not to reuse the component at all.
+component until the hold is cleared and this file is updated. Cleared holds are kept for the
+audit trail.
 
-## HOLD-001 — openelis-analyzer-bridge (modified MPL-2.0, unverified)
+## HOLD-001 — openelis-analyzer-bridge — ✅ CLEARED (reuse permitted under MPL-2.0)
 
 | Field | Value |
 |-------|-------|
 | Component | openelis-analyzer-bridge |
-| Source | https://github.com/DIGI-UW/openelis-analyzer-bridge |
-| License state | **Modified MPL-2.0 — GitHub `NOASSERTION`** (see below) |
+| In-use repo | https://github.com/aiLabSolution/openelis-analyzer-bridge (private mirror) |
+| Upstream | https://github.com/DIGI-UW/openelis-analyzer-bridge |
+| License | **MPL-2.0** with custom (non-grant) warranty/liability clauses — GitHub `NOASSERTION` |
 | Raised | 2026-06-22 (Stage 0 / S0.1) |
-| **Resolution** | **Clean-room reimplementation — direct reuse declined** |
-| Status | **RESOLVED for our roadmap** (clean-room); direct-reuse hold stands |
-| Tracking | Plane **LIS-71** (parked fallback) |
+| Cleared | 2026-06-22 |
+| Status | **CLEARED — direct reuse permitted; bound by the modified MPL-2.0** |
+| Tracking | Plane **LIS-71** (Done) |
 
-**Actual license state (verified 2026-06-22).** The repo *does* ship a `LICENSE.md`, but it
-is the MPL-2.0 text with **custom clauses substituted into the warranty/liability sections** —
-healthcare-specific disclaimers covering clinical-care standards, privacy-law compliance, and
-provider liability. Because the text is modified, GitHub cannot match it to a known license
-and reports `NOASSERTION`. Two further inconsistencies: the **README says "License /
-Contributing: TBD"**, and only *some* source files carry an MPL header. So it is **not plain
-MPL-2.0**, and the governing terms are genuinely ambiguous — it cannot be safely *assumed* to
-be MPL-2.0.
+**The mirror is the same code.** `aiLabSolution/openelis-analyzer-bridge` is a private export of
+DIGI-UW's repo — `develop @ 53b6acbf`, **byte-identical `LICENSE.md`**, commit history authored
+entirely by upstream OpenELIS contributors. It is **upstream code, not LabSolution IP**;
+relocating it into our org did not by itself change any rights.
 
-**Decision.** LabSolution will **reimplement the required ASTM/serial-bridge behavior
-clean-room** under our own license and will **not** copy, vendor, embed, or link the upstream
-code. This takes the license ambiguity off our critical path: we acquire no MPL (or
-modified-MPL) obligation from a component we do not use.
+**Why the hold is cleared.** Reviewing the actual `LICENSE.md`, the **§2 grant is intact, standard
+MPL-2.0** — "a world-wide, royalty-free, non-exclusive license … to use, reproduce, make available,
+modify, display, perform, distribute" plus the §2.1(b) patent grant. The customisations are confined
+to the warranty/liability sections (added healthcare-specific disclaimers), which is why GitHub
+reports `NOASSERTION`; they do **not** restrict the grant of use. **Direct reuse is therefore
+permitted** under those terms.
 
-**Standing rule (still in force).** Do **not** copy / vendor / embed / link
-`openelis-analyzer-bridge` into our build. Reading it as a *behavioral reference* for the
-documented protocols (ASTM/HL7/MLLP/RS232) is fine and is how the clean-room work proceeds.
+**What we accept by using it**
+- **MPL-2.0 file-level copyleft.** Modify the bridge's MPL files and distribute ⇒ make the source of
+  those files available under MPL-2.0 and keep license notices. (Private use triggers nothing — see
+  `MPL-2.0-INVENTORY.md`.)
+- **Modified warranty/liability.** Contributors expressly disclaim fitness for clinical-care
+  standards, privacy-law compliance, and provider judgement. Our ISO 15189 / NPC validation
+  (Stage 5) is what establishes fitness regardless.
+- Track it as a **consumed third-party dependency**, not original work.
 
-**Fallback (only if direct reuse is ever reconsidered).** Obtain written confirmation from
-DIGI-UW of (a) the governing license, (b) whether the custom healthcare clauses apply, and
-(c) that all files are covered — then re-evaluate. Tracked at LIS-71.
+**Optional de-risk (not blocking).** Upstream's README still says "License: TBD," contradicting
+`LICENSE.md`, and file headers are patchy. A one-line confirmation from DIGI-UW that `LICENSE.md`
+governs would erase the last ambiguity — low value given the §2 grant is explicit; pursue only if a
+compliance reviewer asks.
