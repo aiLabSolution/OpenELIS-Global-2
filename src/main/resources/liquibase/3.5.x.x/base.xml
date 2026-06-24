@@ -120,4 +120,7 @@
   <!-- Widen observation_history.value to fit longer Provisional Clinical Diagnosis text (>= 250 chars) -->
   <include relativeToChangelogFile="true" file="045-widen-observation-history-value.xml"/>
 
+  <!-- LIS-6 / S0.4: append-only immutability trigger on the audit history table (reject UPDATE/DELETE at the DB layer) -->
+  <include relativeToChangelogFile="true" file="046-history-append-only.xml"/>
+
 </databaseChangeLog>

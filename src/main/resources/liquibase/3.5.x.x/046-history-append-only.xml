@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-6 / S0.4 — Append-only audit log: DB-layer immutability        -->
+    <!--                                                                    -->
+    <!-- A BEFORE UPDATE OR DELETE row-level trigger rejects any attempt to  -->
+    <!-- change or remove an existing row in clinlims.history, so the audit  -->
+    <!-- spine is tamper-evident at the database layer regardless of the     -->
+    <!-- connecting role (a plain REVOKE UPDATE,DELETE would not bite a       -->
+    <!-- privileged app/test connection). This also protects LIS-5's         -->
+    <!-- access-denial rows (activity 'X'), which live in this same table.   -->
+    <!--                                                                    -->
+    <!-- Scope decision — UPDATE/DELETE only, NOT TRUNCATE. history is reset  -->
+    <!-- by TRUNCATE in two paths that must keep working:                    -->
+    <!--   * the integration-test harness (BaseWebContextSensitiveTest       -->
+    <!--     truncates between fixtures), and                                -->
+    <!--   * the training-installation reset endpoints                       -->
+    <!--     (DatabaseCleaningRestController / DeletePatientTestDataController -->
+    <!--     -> DatabaseCleanServiceImpl, which TRUNCATEs ~28 tables incl.    -->
+    <!--     history, gated to TrainingInstallation only).                   -->
+    <!-- No runtime path performs a row-level UPDATE/DELETE on history        -->
+    <!-- (audit emission is INSERT-only), so this guard breaks nothing.      -->
+    <!-- S0.4 AC2 requires UPDATE+DELETE rejection; a BEFORE TRUNCATE guard   -->
+    <!-- is deliberately omitted — it would block those resets and adds no    -->
+    <!-- real protection (anyone who can TRUNCATE can also DROP the trigger). -->
+    <!-- Mirrors the proven esig-005 immutability trigger in                  -->
+    <!-- 004-electronic-signature.xml.                                       -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis6-001-history-append-only-trigger" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="history" schemaName="clinlims"/>
+        </preConditions>
+        <comment>Enforce append-only immutability on the audit history table (LIS-6 / S0.4): reject UPDATE and DELETE at the DB layer.</comment>
+
+        <sql splitStatements="false">
+            CREATE OR REPLACE FUNCTION clinlims.prevent_history_modification()
+            RETURNS TRIGGER AS $BODY$
+            BEGIN
+                RAISE EXCEPTION 'clinlims.history is append-only; audit records cannot be updated or deleted (LIS-6/S0.4)';
+                RETURN NULL;
+            END;
+            $BODY$ LANGUAGE plpgsql;
+        </sql>
+
+        <sql splitStatements="false">
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'history_append_only_check') THEN
+                    CREATE TRIGGER history_append_only_check
+                    BEFORE UPDATE OR DELETE ON clinlims.history
+                    FOR EACH ROW EXECUTE FUNCTION clinlims.prevent_history_modification();
+                END IF;
+            END $$;
+        </sql>
+
+        <rollback>
+            <sql>DROP TRIGGER IF EXISTS history_append_only_check ON clinlims.history;</sql>
+            <sql>DROP FUNCTION IF EXISTS clinlims.prevent_history_modification();</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
