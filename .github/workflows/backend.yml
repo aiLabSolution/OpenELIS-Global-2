@@ -1,5 +1,10 @@
 name: 01 - Backend
 
+# Touched to register this workflow with GitHub Actions on the aiLabSolution
+# fork. It was present in the imported tree but never indexed, so pull requests
+# to `main` ran no backend checks (only publish-images.yml + Dependency Graph
+# were registered). This comment is behavior-neutral: triggers and jobs are
+# unchanged; the `pull_request` event below already covers PRs to `main`.
 on:
   push:
     branches: [develop]
