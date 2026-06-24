@@ -22,6 +22,7 @@ import java.util.Set;
 import org.apache.commons.validator.GenericValidator;
 import org.jasypt.util.text.AES256TextEncryptor;
 import org.jasypt.util.text.TextEncryptor;
+import org.openelisglobal.audittrail.service.AccessDeniedAuditService;
 import org.openelisglobal.common.exception.LIMSRuntimeException;
 import org.openelisglobal.config.condition.ConditionalOnProperty;
 import org.openelisglobal.security.KeystoreUtil.KeyCertPair;
@@ -81,6 +82,7 @@ import org.springframework.security.saml2.provider.service.registration.RelyingP
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrations;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;
@@ -408,7 +410,8 @@ public class SecurityConfig {
     @Bean
     @ConditionalOnProperty(property = "org.itech.login.form", havingValue = "true", matchIfMissing = true)
     @Order(Ordered.LOWEST_PRECEDENCE)
-    public SecurityFilterChain defaultSecurityConfigurationFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain defaultSecurityConfigurationFilterChain(HttpSecurity http,
+            AccessDeniedHandler auditingAccessDeniedHandler) throws Exception {
         CharacterEncodingFilter filter = new CharacterEncodingFilter();
         filter.setEncoding("UTF-8");
         filter.setForceEncoding(true);
@@ -435,21 +438,9 @@ public class SecurityConfig {
                 .sessionManagement(sessionManagement -> sessionManagement.invalidSessionUrl("/LoginPage")
                         .sessionFixation().migrateSession())
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/ValidateLogin"))
-                .exceptionHandling(ex -> ex.accessDeniedHandler((request, response, accessDeniedException) -> {
-                    String path = request.getRequestURI().substring(request.getContextPath().length());
-                    if (path.startsWith("/rest") || path.startsWith("/Provider")
-                            || path.startsWith("/api/OpenELIS-Global/rest")) {
-                        response.setStatus(403);
-                        response.setContentType("application/json");
-                        response.setCharacterEncoding("UTF-8");
-                        String message = (accessDeniedException instanceof org.springframework.security.web.csrf.CsrfException)
-                                ? "CSRF token missing or invalid"
-                                : "Access denied";
-                        response.getWriter().write("{ \"status\": 403, \"message\": \"" + message + "\" }");
-                    } else {
-                        response.sendRedirect(request.getContextPath() + "/Home?access=denied");
-                    }
-                }))
+                // Records every access denial (403) as an attributable audit record
+                // before producing the established 403-JSON / redirect response (LIS-5).
+                .exceptionHandling(ex -> ex.accessDeniedHandler(auditingAccessDeniedHandler))
                 // add security headers
                 .headers(headers -> headers.frameOptions().sameOrigin().contentSecurityPolicy(CONTENT_SECURITY_POLICY));
         return http.build();
@@ -464,6 +455,11 @@ public class SecurityConfig {
     @Primary
     public AuthenticationSuccessHandler customAuthenticationSuccessHandler() {
         return new CustomFormAuthenticationSuccessHandler();
+    }
+
+    @Bean
+    public AccessDeniedHandler auditingAccessDeniedHandler(AccessDeniedAuditService accessDeniedAuditService) {
+        return new AuditingAccessDeniedHandler(accessDeniedAuditService);
     }
 
     // @Bean
