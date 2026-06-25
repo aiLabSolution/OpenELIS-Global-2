@@ -126,4 +126,7 @@
   <!-- LIS-7 / S0.5: result raw+normalized columns + append-only result_version sidecar (auto-versioned, DB-layer immutable) -->
   <include relativeToChangelogFile="true" file="047-result-shape.xml"/>
 
+  <!-- LIS-8 / S0.6: LOINC/UCUM reference seed + analyzer vendor-code -> LOINC/UCUM normalization mapping -->
+  <include relativeToChangelogFile="true" file="048-loinc-ucum-seed.xml"/>
+
 </databaseChangeLog>

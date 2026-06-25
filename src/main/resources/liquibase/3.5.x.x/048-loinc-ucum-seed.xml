@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-8 / S0.6 — Seed LOINC/UCUM reference + vendor-code normalization -->
+    <!--                                                                    -->
+    <!-- Goal (plan §0 / §5.1): seed the LOINC/UCUM reference data so an     -->
+    <!-- analyzer-native observation code normalizes to a LOINC code + a     -->
+    <!-- UCUM unit, and prove ≥1 such mapping reaches a clinlims.result row  -->
+    <!-- (the LIS-7 / S0.5 047-result-shape columns: raw_code/raw_unit beside -->
+    <!-- loinc/ucum_value/status).                                           -->
+    <!--                                                                    -->
+    <!-- WHAT THIS ADDS                                                      -->
+    <!-- 1. clinlims.vendor_code_mapping — a small additive reference table   -->
+    <!--    keyed by (source, vendor_code) that resolves an analyzer-native   -->
+    <!--    observation code to (loinc, ucum_code). This is the lookup the    -->
+    <!--    Stage-1 normalization service ("vendor code -> LOINC, unit ->     -->
+    <!--    UCUM", plan §1) consumes. Column widths mirror the canonical      -->
+    <!--    terminology/UoM columns and the 047 result columns: loinc         -->
+    <!--    VARCHAR(80) = test_terminology_mapping.code (043) = result.loinc;  -->
+    <!--    ucum_code VARCHAR(40) = unit_of_measure.ucum_code (042) =          -->
+    <!--    result.ucum_value; vendor_code VARCHAR(80) = result.raw_code.      -->
+    <!-- 2. One seeded mapping: ANALYZER/GLU -> LOINC 2345-7 (Glucose         -->
+    <!--    [Mass/volume] in Serum or Plasma), UCUM mg/dL.                     -->
+    <!-- 3. The matching UCUM unit on the canonical clinlims.unit_of_measure   -->
+    <!--    master (ucum_code = mg/dL), so the UCUM half of the seed lands in  -->
+    <!--    OpenELIS's existing unit reference, not only the new table.        -->
+    <!--                                                                    -->
+    <!-- SCOPE / DEFERRALS                                                   -->
+    <!-- * No JPA entity/DAO/service — the normalization service (entity +    -->
+    <!--   resolve-on-ingest) is Stage-1 work; S0.6 only needs the seed +     -->
+    <!--   the data-layer proof (an integration test resolves the seed via    -->
+    <!--   JDBC and writes the normalized values onto a result row).          -->
+    <!-- * Not seeding test_terminology_mapping (043): it is keyed per        -->
+    <!--   test_id with an FK to clinlims.test, and per-test LOINC backfill is  -->
+    <!--   already owned by OGC-939 (loinc-mapping-backfill). vendor_code_     -->
+    <!--   mapping is the analyzer-code -> LOINC/UCUM reference, a distinct    -->
+    <!--   concern.                                                           -->
+    <!--                                                                    -->
+    <!-- All changesets are idempotent (preConditions onFail=MARK_RAN) and    -->
+    <!-- ship to every environment (no context attribute), so the seed is     -->
+    <!-- present in the integration-test harness's migrated schema. Each      -->
+    <!-- changeset has an explicit rollback.                                  -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis8-001-create-vendor-code-mapping-table" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists schemaName="clinlims" tableName="vendor_code_mapping"/>
+            </not>
+        </preConditions>
+        <comment>Analyzer-native observation code -> normalized (LOINC, UCUM) reference for the normalization service (LIS-8 / S0.6).</comment>
+
+        <createTable schemaName="clinlims" tableName="vendor_code_mapping">
+            <column name="id" type="VARCHAR(36)">
+                <constraints primaryKey="true" nullable="false" primaryKeyName="pk_vendor_code_mapping"/>
+            </column>
+            <!-- the analyzer/vendor family the code belongs to (e.g. ANALYZER, or a specific instrument family) -->
+            <column name="source" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- the analyzer-native observation code, as it arrives on the wire (matches result.raw_code width) -->
+            <column name="vendor_code" type="VARCHAR(80)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- normalized LOINC code (matches test_terminology_mapping.code / result.loinc width) -->
+            <column name="loinc" type="VARCHAR(80)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- normalized UCUM unit (matches unit_of_measure.ucum_code / result.ucum_value width) -->
+            <column name="ucum_code" type="VARCHAR(40)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- human-readable analyte label for review/audit -->
+            <column name="description" type="VARCHAR(255)"/>
+            <column name="is_active" type="VARCHAR(2)" defaultValue="Y">
+                <constraints nullable="false"/>
+            </column>
+            <column name="lastupdated" type="TIMESTAMP" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint schemaName="clinlims" tableName="vendor_code_mapping"
+            columnNames="source, vendor_code" constraintName="uq_vendor_code_mapping"/>
+
+        <rollback>
+            <dropTable schemaName="clinlims" tableName="vendor_code_mapping"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis8-002-seed-ucum-unit-mg-dl" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM clinlims.unit_of_measure WHERE name = 'mg/dL'
+            </sqlCheck>
+        </preConditions>
+        <comment>Seed the mg/dL unit on the canonical unit_of_measure master with its UCUM code (LIS-8 / S0.6).</comment>
+
+        <insert schemaName="clinlims" tableName="unit_of_measure">
+            <column name="id" valueSequenceNext="unit_of_measure_seq"/>
+            <column name="name" value="mg/dL"/>
+            <column name="description" value="Milligrams per deciliter"/>
+            <column name="ucum_code" value="mg/dL"/>
+            <column name="lastupdated" valueDate="CURRENT_TIMESTAMP"/>
+        </insert>
+
+        <rollback>
+            <sql>DELETE FROM clinlims.unit_of_measure WHERE name = 'mg/dL'</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis8-003-set-ucum-code-on-mg-dl" author="labsolution">
+        <!-- If an mg/dL unit pre-existed without a UCUM code, populate it so the UCUM
+             half of the seed is present on the canonical master regardless. -->
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM clinlims.unit_of_measure WHERE name = 'mg/dL' AND ucum_code = 'mg/dL'
+            </sqlCheck>
+        </preConditions>
+        <comment>Ensure the canonical mg/dL unit carries ucum_code = mg/dL even if the row pre-existed (LIS-8 / S0.6).</comment>
+
+        <update schemaName="clinlims" tableName="unit_of_measure">
+            <column name="ucum_code" value="mg/dL"/>
+            <where>name = 'mg/dL' AND (ucum_code IS NULL OR ucum_code != 'mg/dL')</where>
+        </update>
+
+        <rollback>
+            <sql>UPDATE clinlims.unit_of_measure SET ucum_code = NULL WHERE name = 'mg/dL'</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis8-004-seed-vendor-code-mapping-glucose" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM clinlims.vendor_code_mapping WHERE source = 'ANALYZER' AND vendor_code = 'GLU'
+            </sqlCheck>
+        </preConditions>
+        <comment>Seed one analyzer-native code -> LOINC/UCUM mapping: ANALYZER/GLU -> LOINC 2345-7, UCUM mg/dL (LIS-8 / S0.6).</comment>
+
+        <insert schemaName="clinlims" tableName="vendor_code_mapping">
+            <column name="id" valueComputed="gen_random_uuid()::varchar"/>
+            <column name="source" value="ANALYZER"/>
+            <column name="vendor_code" value="GLU"/>
+            <column name="loinc" value="2345-7"/>
+            <column name="ucum_code" value="mg/dL"/>
+            <column name="description" value="Glucose [Mass/volume] in Serum or Plasma"/>
+            <column name="is_active" value="Y"/>
+            <column name="lastupdated" valueDate="CURRENT_TIMESTAMP"/>
+        </insert>
+
+        <rollback>
+            <sql>DELETE FROM clinlims.vendor_code_mapping WHERE source = 'ANALYZER' AND vendor_code = 'GLU'</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
