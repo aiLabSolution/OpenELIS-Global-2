@@ -44,60 +44,26 @@ public class HistoryServiceTest extends BaseWebContextSensitiveTest {
         Assert.assertEquals(1, historyList.size());
     }
 
+    /**
+     * LIS-6 / S0.4: clinlims.history is append-only. The DB-layer trigger
+     * (Liquibase changeset 046-history-append-only.xml) rejects any UPDATE of an
+     * existing audit row, so HistoryService.update() on a persisted history row
+     * fails. HistoryService.update/delete have no production callers (audit
+     * emission is INSERT-only); these previously asserted that history was mutable,
+     * which the append-only invariant now forbids. The full DB-layer proof lives in
+     * {@code org.openelisglobal.audittrail.HistoryAppendOnlyIntegrationTest}.
+     */
     @Test
-    public void updateHistory_shouldModifyAndReturnUpdatedRecord() {
+    public void update_existingHistoryRow_isRejectedByAppendOnlyTrigger() {
         List<History> historyList = historyService.getHistoryByRefIdAndRefTableId("67890", "1");
         Assert.assertFalse(historyList.isEmpty());
 
         History history = historyList.get(0);
-        Timestamp newTimestamp = Timestamp.from(Instant.now());
-        history.setTimestamp(newTimestamp);
+        history.setChanges("tamper".getBytes()); // genuinely dirty -> forces a SQL UPDATE on flush
 
-        historyService.update(history);
-
-        List<History> updatedHistoryList = historyService.getHistoryByRefIdAndRefTableId("67890", "1");
-        History updatedHistory = updatedHistoryList.get(0);
-
-        Assert.assertNotNull(updatedHistory);
-    }
-
-    @Test
-    public void update_validHistory_shouldUpdateRecord() {
-        List<History> historyList = historyService.getHistoryByRefIdAndRefTableId("67890", "1");
-        Assert.assertFalse(historyList.isEmpty());
-
-        History history = historyList.get(0);
-        Timestamp newTimestamp = Timestamp.from(Instant.now());
-        history.setTimestamp(newTimestamp);
-
-        History updatedHistory = historyService.update(history);
-
-        Assert.assertNotNull(updatedHistory);
-        Assert.assertEquals(newTimestamp, updatedHistory.getTimestamp());
-    }
-
-    @Test
-    public void update_historyWithNullLastupdated_shouldSetTimestampAndUpdate() {
-        List<History> historyList = historyService.getHistoryByRefIdAndRefTableId("67890", "1");
-        Assert.assertEquals(2, historyList.size());
-
-        History history = historyList.get(0);
-        history.setLastupdated(null);
-        historyService.update(history);
-    }
-
-    @Test
-    public void update_historyWithLastupdated_shouldUpdateNormally() {
-        List<History> historyList = historyService.getHistoryByRefIdAndRefTableId("67890", "2");
-        Assert.assertEquals(1, historyList.size());
-
-        History history = historyList.get(0);
-        Timestamp timestamp = Timestamp.from(Instant.now());
-        history.setLastupdated(timestamp);
-        history.setChanges("Updated changes".getBytes());
-
-        // This triggers the non-null lastupdated branch
-        historyService.update(history);
+        Exception ex = Assert.assertThrows(Exception.class, () -> historyService.update(history));
+        Assert.assertTrue("update should be rejected by the append-only guard, was: " + causeChainMessage(ex),
+                causeChainMessage(ex).toLowerCase().contains("append-only"));
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -197,5 +163,16 @@ public class HistoryServiceTest extends BaseWebContextSensitiveTest {
         searchHistory.setReferenceTable("1");
 
         historyService.getHistoryByRefIdAndRefTableId(searchHistory);
+    }
+
+    /** Flatten a throwable's cause chain into one string for message assertions. */
+    private static String causeChainMessage(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c.getMessage() != null) {
+                sb.append(c.getMessage()).append(" | ");
+            }
+        }
+        return sb.toString();
     }
 }
