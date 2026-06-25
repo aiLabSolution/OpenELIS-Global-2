@@ -45,6 +45,23 @@
         <property name="value" type="java.lang.String">
             <column name="VALUE" length="200" />
         </property>
+        <!-- LIS-7 / S0.5 — raw analyzer observation beside its normalized LOINC/UCUM
+            form. -->
+        <property name="rawCode" type="java.lang.String">
+            <column name="RAW_CODE" length="80" />
+        </property>
+        <property name="rawUnit" type="java.lang.String">
+            <column name="RAW_UNIT" length="40" />
+        </property>
+        <property name="loinc" type="java.lang.String">
+            <column name="LOINC" length="80" />
+        </property>
+        <property name="ucumValue" type="java.lang.String">
+            <column name="UCUM_VALUE" length="40" />
+        </property>
+        <property name="status" type="java.lang.String">
+            <column name="STATUS" length="20" />
+        </property>
         <property name="minNormal" type="java.lang.Double"
             column="min_normal" />
         <property name="maxNormal" type="java.lang.Double"

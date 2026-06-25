@@ -39,6 +39,12 @@ public class Result extends EnumValueItemImpl {
     private String isReportable;
     private String resultType;
     private String value;
+    // LIS-7 / S0.5 — raw analyzer observation captured beside its normalized form.
+    private String rawCode;
+    private String rawUnit;
+    private String loinc;
+    private String ucumValue;
+    private String status;
     private Double minNormal;
     private Double maxNormal;
     private int significantDigits;
@@ -142,6 +148,46 @@ public class Result extends EnumValueItemImpl {
 
     public void setValue(String value) {
         this.value = value;
+    }
+
+    public String getRawCode() {
+        return rawCode;
+    }
+
+    public void setRawCode(String rawCode) {
+        this.rawCode = rawCode;
+    }
+
+    public String getRawUnit() {
+        return rawUnit;
+    }
+
+    public void setRawUnit(String rawUnit) {
+        this.rawUnit = rawUnit;
+    }
+
+    public String getLoinc() {
+        return loinc;
+    }
+
+    public void setLoinc(String loinc) {
+        this.loinc = loinc;
+    }
+
+    public String getUcumValue() {
+        return ucumValue;
+    }
+
+    public void setUcumValue(String ucumValue) {
+        this.ucumValue = ucumValue;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     @Override

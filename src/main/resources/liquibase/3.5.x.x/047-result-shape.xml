@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-7 / S0.5 — Result table shape + append-only result versions     -->
+    <!--                                                                    -->
+    <!-- Two concerns of the slice (plan §0 / research §5.1):                -->
+    <!--                                                                    -->
+    <!-- 1. RAW + NORMALIZED SIDE BY SIDE. Five additive, nullable columns   -->
+    <!--    on clinlims.result let one row carry both the analyzer-native    -->
+    <!--    observation (raw_code, raw_unit) and its normalized form         -->
+    <!--    (loinc, ucum_value) plus a normalization status. All are         -->
+    <!--    net-new (no collision: result_type is a value-TYPE discriminator,-->
+    <!--    not a lifecycle status). Widths align with the canonical         -->
+    <!--    terminology/UoM columns: test_terminology_mapping.code (043) is   -->
+    <!--    VARCHAR(80) -> raw_code/loinc; unit_of_measure.ucum_code (042) is -->
+    <!--    VARCHAR(40) -> raw_unit/ucum_value. Nullable + dynamic-update     -->
+    <!--    means existing result inserts/updates are untouched.             -->
+    <!--                                                                    -->
+    <!-- 2. APPEND-ONLY RESULT VERSIONS. A dedicated sidecar                  -->
+    <!--    clinlims.result_version records a snapshot of the value + the     -->
+    <!--    five normalization columns on every result write, numbered per   -->
+    <!--    result. Appending is enforced at the DB layer two ways:          -->
+    <!--      * an AFTER INSERT OR UPDATE trigger on result inserts the next  -->
+    <!--        version whenever a value/normalization column actually        -->
+    <!--        changes (so no write path can escape versioning, and an       -->
+    <!--        incidental update — e.g. sort_order — spawns no version), and -->
+    <!--      * a BEFORE UPDATE OR DELETE trigger on result_version rejects    -->
+    <!--        any attempt to rewrite or remove an existing version,         -->
+    <!--        cloned verbatim from the proven 046 history guard.            -->
+    <!--    Last-writer-wins is therefore structurally impossible on the      -->
+    <!--    version spine — the foundation Stage-4 reconciliation builds on.  -->
+    <!--                                                                    -->
+    <!-- The append-only guard is on the SIDECAR ONLY, never on result:      -->
+    <!--   the live result row is mutated in place on every edit             -->
+    <!--   (BaseObjectServiceImpl.update -> Hibernate UPDATE), so a guard on  -->
+    <!--   result would break every normal result save.                      -->
+    <!--                                                                    -->
+    <!-- Scope (mirrors 046): UPDATE/DELETE rejection only, NO TRUNCATE       -->
+    <!--   guard, so the integration-test harness (TRUNCATE ... CASCADE) and  -->
+    <!--   training-installation resets keep working; a CASCADE truncate of   -->
+    <!--   result clears its versions without firing the row-level guard.     -->
+    <!--                                                                    -->
+    <!-- Deferred to Stage-4 (flagged for review): a user-aware version-write -->
+    <!--   path populating a changed_by actor (the per-change actor today     -->
+    <!--   lives in the append-only clinlims.history audit spine); tightening  -->
+    <!--   result.status to a documented enum/lookup; concurrency hardening   -->
+    <!--   of version_number assignment.                                      -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis7-001-add-result-normalization-columns" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists schemaName="clinlims" tableName="result" columnName="raw_code"/>
+            </not>
+        </preConditions>
+        <comment>Add raw + normalized observation columns to clinlims.result (LIS-7 / S0.5): analyzer-native code/unit beside normalized LOINC/UCUM + a normalization status.</comment>
+
+        <addColumn schemaName="clinlims" tableName="result">
+            <column name="raw_code" type="VARCHAR(80)"/>
+            <column name="raw_unit" type="VARCHAR(40)"/>
+            <column name="loinc" type="VARCHAR(80)"/>
+            <column name="ucum_value" type="VARCHAR(40)"/>
+            <column name="status" type="VARCHAR(20)"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="raw_code"/>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="raw_unit"/>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="loinc"/>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="ucum_value"/>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="status"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis7-002-create-result-version-sequence" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <sequenceExists schemaName="clinlims" sequenceName="result_version_seq"/>
+            </not>
+        </preConditions>
+        <comment>Sequence backing clinlims.result_version surrogate ids (LIS-7 / S0.5).</comment>
+
+        <createSequence schemaName="clinlims" sequenceName="result_version_seq" startValue="1" incrementBy="1"/>
+
+        <rollback>
+            <dropSequence schemaName="clinlims" sequenceName="result_version_seq"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis7-003-create-result-version-table" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists schemaName="clinlims" tableName="result_version"/>
+            </not>
+        </preConditions>
+        <comment>Append-only snapshot of a result's value + normalization columns, one row per version (LIS-7 / S0.5).</comment>
+
+        <createTable schemaName="clinlims" tableName="result_version">
+            <column name="id" type="numeric(10,0)" defaultValueComputed="nextval('clinlims.result_version_seq')">
+                <constraints primaryKey="true" primaryKeyName="result_version_pkey" nullable="false"/>
+            </column>
+            <column name="result_id" type="numeric(10,0)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="numeric(10,0)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="value" type="VARCHAR(200)"/>
+            <column name="raw_code" type="VARCHAR(80)"/>
+            <column name="raw_unit" type="VARCHAR(40)"/>
+            <column name="loinc" type="VARCHAR(80)"/>
+            <column name="ucum_value" type="VARCHAR(40)"/>
+            <column name="status" type="VARCHAR(20)"/>
+            <column name="changed_at" type="TIMESTAMP" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <rollback>
+            <dropTable schemaName="clinlims" tableName="result_version"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis7-004-result-version-unique-version" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_result_version_result_version"/>
+            </not>
+        </preConditions>
+        <comment>One row per (result, version_number); the leading result_id also serves lookup-by-result, so no separate index is needed (LIS-7 / S0.5).</comment>
+
+        <addUniqueConstraint schemaName="clinlims" tableName="result_version"
+            columnNames="result_id, version_number" constraintName="uq_result_version_result_version"/>
+
+        <rollback>
+            <dropUniqueConstraint schemaName="clinlims" tableName="result_version"
+                constraintName="uq_result_version_result_version"/>
+        </rollback>
+    </changeSet>
+
+    <!--
+      result_id is a SOFT reference (NOT NULL, indexed, but no foreign key),
+      mirroring the append-only clinlims.history audit spine whose
+      reference_id/reference_table carry no FK to the audited entity. Rationale:
+        * the version trail is an audit artifact that should OUTLIVE the result
+          row and survive teardown — several integration suites hard-delete result
+          rows (DELETE FROM result WHERE analysis_id IN ...), and an FK would either
+          block that delete (RESTRICT) or cascade a row-level DELETE that the
+          append-only guard below rejects (CASCADE). A soft reference avoids both
+          while keeping auto-versioning and immutability intact.
+    -->
+
+    <changeSet id="lis7-005-result-append-version-trigger" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <tableExists schemaName="clinlims" tableName="result_version"/>
+        </preConditions>
+        <comment>AFTER INSERT OR UPDATE on result appends the next result_version snapshot whenever a value/normalization column changes (LIS-7 / S0.5).</comment>
+
+        <sql splitStatements="false">
+            CREATE OR REPLACE FUNCTION clinlims.append_result_version()
+            RETURNS TRIGGER AS $BODY$
+            BEGIN
+                -- On UPDATE, only version a genuine value/normalization change;
+                -- incidental edits (sort_order, is_reportable, ...) spawn no version.
+                IF (TG_OP = 'UPDATE'
+                    AND OLD.value IS NOT DISTINCT FROM NEW.value
+                    AND OLD.raw_code IS NOT DISTINCT FROM NEW.raw_code
+                    AND OLD.raw_unit IS NOT DISTINCT FROM NEW.raw_unit
+                    AND OLD.loinc IS NOT DISTINCT FROM NEW.loinc
+                    AND OLD.ucum_value IS NOT DISTINCT FROM NEW.ucum_value
+                    AND OLD.status IS NOT DISTINCT FROM NEW.status) THEN
+                    RETURN NULL;
+                END IF;
+
+                INSERT INTO clinlims.result_version
+                    (result_id, version_number, value, raw_code, raw_unit, loinc, ucum_value, status)
+                VALUES
+                    (NEW.id,
+                     (SELECT COALESCE(MAX(rv.version_number), 0) + 1
+                        FROM clinlims.result_version rv WHERE rv.result_id = NEW.id),
+                     NEW.value, NEW.raw_code, NEW.raw_unit, NEW.loinc, NEW.ucum_value, NEW.status);
+                RETURN NULL;
+            END;
+            $BODY$ LANGUAGE plpgsql;
+        </sql>
+
+        <sql splitStatements="false">
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'result_append_version') THEN
+                    CREATE TRIGGER result_append_version
+                    AFTER INSERT OR UPDATE ON clinlims.result
+                    FOR EACH ROW EXECUTE FUNCTION clinlims.append_result_version();
+                END IF;
+            END $$;
+        </sql>
+
+        <rollback>
+            <sql>DROP TRIGGER IF EXISTS result_append_version ON clinlims.result;</sql>
+            <sql>DROP FUNCTION IF EXISTS clinlims.append_result_version();</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis7-006-result-version-append-only-trigger" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <tableExists schemaName="clinlims" tableName="result_version"/>
+        </preConditions>
+        <comment>Enforce append-only immutability on clinlims.result_version (LIS-7 / S0.5): reject UPDATE and DELETE at the DB layer. Mirrors 046.</comment>
+
+        <sql splitStatements="false">
+            CREATE OR REPLACE FUNCTION clinlims.prevent_result_version_modification()
+            RETURNS TRIGGER AS $BODY$
+            BEGIN
+                RAISE EXCEPTION 'clinlims.result_version is append-only; result versions cannot be updated or deleted (LIS-7/S0.5)';
+                RETURN NULL;
+            END;
+            $BODY$ LANGUAGE plpgsql;
+        </sql>
+
+        <sql splitStatements="false">
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'result_version_append_only_check') THEN
+                    CREATE TRIGGER result_version_append_only_check
+                    BEFORE UPDATE OR DELETE ON clinlims.result_version
+                    FOR EACH ROW EXECUTE FUNCTION clinlims.prevent_result_version_modification();
+                END IF;
+            END $$;
+        </sql>
+
+        <rollback>
+            <sql>DROP TRIGGER IF EXISTS result_version_append_only_check ON clinlims.result_version;</sql>
+            <sql>DROP FUNCTION IF EXISTS clinlims.prevent_result_version_modification();</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
