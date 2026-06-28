@@ -1834,13 +1834,25 @@ public class FhirTransformServiceImpl implements FhirTransformService {
         if (analyzer == null) {
             return;
         }
-        String fhirUuid = analyzer.ensureFhirUuid();
-        observation.setDevice(this.createReferenceFor(ResourceType.Device, fhirUuid));
+        this.linkObservationToDevice(observation, analyzer);
         if (!includedAnalyzerIds.contains(analysis.getAnalyzerId())) {
             Device device = this.transformAnalyzerToDevice(analyzer);
             this.addToOperations(fhirOperations, tempIdGenerator, device);
             includedAnalyzerIds.add(analysis.getAnalyzerId());
         }
+    }
+
+    /**
+     * Links an Observation to the FHIR Device representing the analyzer that
+     * produced it (R4 {@code Observation.device}). The reference id-part is the
+     * analyzer's FHIR UUID, which is also the id of the Device built by
+     * {@link #transformAnalyzerToDevice(Analyzer)} — so within a bundle the
+     * reference resolves to that Device. Extracted as a package-visible seam (no
+     * behavior change) so the DiagnosticReport -> result -> Observation -> Device
+     * linkage is unit-testable (LIS-43/S4.3).
+     */
+    void linkObservationToDevice(Observation observation, Analyzer analyzer) {
+        observation.setDevice(this.createReferenceFor(ResourceType.Device, analyzer.ensureFhirUuid()));
     }
 
     /**
@@ -1907,7 +1919,11 @@ public class FhirTransformServiceImpl implements FhirTransformService {
         return diagnosticReport;
     }
 
-    private Device transformAnalyzerToDevice(Analyzer analyzer) {
+    // Package-visible (not private) so the FHIR R4 conformance gate can build the
+    // Device for a result's analyzer and assert it is $validate-clean and resolves
+    // from the DiagnosticReport's result -> Observation -> device chain
+    // (LIS-43/S4.3).
+    Device transformAnalyzerToDevice(Analyzer analyzer) {
         Device device = new Device();
         // ensureFhirUuid() generates a UUID if missing (shouldn't happen with backfill
         // migration)
