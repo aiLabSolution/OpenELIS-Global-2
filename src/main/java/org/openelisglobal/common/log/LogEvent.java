@@ -13,7 +13,7 @@
  */
 package org.openelisglobal.common.log;
 
-import org.apache.log4j.Category;
+import org.apache.log4j.Logger;
 import org.owasp.encoder.Encode;
 
 /**
@@ -213,8 +213,12 @@ public class LogEvent {
                 "Class: " + className + ", Method: " + methodName + ", Fatal:" + sanitizeLogMessage(fatalMessage));
     }
 
-    private static Category getLog() {
-        return Category.getInstance(LogEvent.class);
+    private static Logger getLog() {
+        // org.apache.log4j.Logger (extends Category) — the log4j-1.2-api Category shim
+        // dropped
+        // trace() after log4j2 2.17.x; Logger retains it (LIS-41 / S4.1 log4j2 2.17.1
+        // -> 2.24.3).
+        return Logger.getLogger(LogEvent.class);
     }
 
     // for preventing log forging

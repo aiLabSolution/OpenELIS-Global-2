@@ -25,7 +25,10 @@
         <hibernate-validator.version>8.0.2.Final</hibernate-validator.version>
         <hibernate-search.version>6.1.8.Final</hibernate-search.version>
         <postgresql.version>42.7.11</postgresql.version>
-        <log4j.version>2.17.1</log4j.version>
+        <!-- log4j2 2.17.1 -> 2.24.3 (LIS-41 / S4.1): HAPI 8.x logs via slf4j 2.x;
+            the slf4j2 binding (log4j-slf4j2-impl) requires log4j2 >= 2.19. Also picks
+            up post-2.17.1 fixes. -->
+        <log4j.version>2.24.3</log4j.version>
         <springframework.version>6.2.17</springframework.version>
         <springsecurity.version>6.2.8</springsecurity.version>
         <testContainersVersion>1.19.8</testContainersVersion>
@@ -77,10 +80,16 @@
             <artifactId>dataexport-core</artifactId>
             <version>0.0.0.9</version>
         </dependency>
+        <!-- HAPI FHIR bumped 7.0.2 -> 8.10.0 (LIS-41 / S4.1) so the FHIR instance
+            validator ($validate) is usable. The app runs org.hl7.fhir.core 6.9.4 (an
+            upstream dependency update), but the 7.0.2 validator wrapper referenced org.hl7.fhir.r5.utils.FHIRPathEngine,
+            which core 6.9.4 relocated to org.hl7.fhir.r5.fhirpath — an irreconcilable
+            wrapper/core skew. HAPI 8.10.0 natively pairs with core 6.9.4.1, realigning
+            the wrapper with the core. Core artifacts bumped 6.9.4 -> 6.9.4.1 to match. -->
         <dependency>
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-structures-r4</artifactId>
-            <version>7.0.2</version>
+            <version>8.10.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>xpp3</groupId>
@@ -91,28 +100,57 @@
         <dependency>
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-client</artifactId>
-            <version>7.0.2</version>
+            <version>8.10.0</version>
         </dependency>
         <dependency>
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-server</artifactId>
-            <version>7.0.2</version>
+            <version>8.10.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>org.hl7.fhir.r4</artifactId>
-            <version>6.9.4</version>
+            <version>6.9.4.1</version>
         </dependency>
         <dependency>
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>org.hl7.fhir.utilities</artifactId>
-            <version>6.9.4</version>
+            <version>6.9.4.1</version>
         </dependency>
         <dependency>
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-base</artifactId>
-            <version>7.0.2</version>
+            <version>8.10.0</version>
+        </dependency>
+        <dependency>
+            <!-- FHIR R4 instance validation ($validate) — LIS-41 / S4.1 conformance
+                test. FhirInstanceValidator + DefaultProfileValidationSupport; the base R4
+                StructureDefinitions ship in org.hl7.fhir.r4. Test scope: this slice asserts
+                the produced resources are $validate-clean; no runtime $validate operation
+                is exposed yet. -->
+            <groupId>ca.uhn.hapi.fhir</groupId>
+            <artifactId>hapi-fhir-validation</artifactId>
+            <version>8.10.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Base R4 conformance resources (profiles-resources.xml etc.) that
+                DefaultProfileValidationSupport reads to recognise/validate resources. They
+                are NOT bundled in org.hl7.fhir.r4; without this the validator reports a
+                fatal "unknown resource name 'Observation'". Test scope. -->
+            <groupId>ca.uhn.hapi.fhir</groupId>
+            <artifactId>hapi-fhir-validation-resources-r4</artifactId>
+            <version>8.10.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Cache SPI required at runtime by hapi-fhir-validation's worker context
+                (HAPI-2200 without it). Test scope: only the conformance test needs it. -->
+            <groupId>ca.uhn.hapi.fhir</groupId>
+            <artifactId>hapi-fhir-caching-caffeine</artifactId>
+            <version>8.10.0</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -435,16 +473,24 @@
             <artifactId>log4j-jcl</artifactId>
             <version>${log4j.version}</version>
         </dependency>
+        <!-- log4j-liquibase removed: the artifact was discontinued after log4j2
+            2.17.x and is absent at 2.24.3. Liquibase 4.8.0 ships its own log service;
+            application logging continues on log4j2 via the slf4j2 binding. -->
+
         <dependency>
+            <!-- slf4j 2.x binding for log4j2 (was log4j-slf4j-impl, the slf4j 1.7
+                binding). HAPI 8.x calls the slf4j 2.x API (Logger.atDebug()); the 1.7 binding
+                pinned slf4j-api to 1.7.25, causing NoSuchMethodError. -->
             <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-liquibase</artifactId>
-            <version>${log4j.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
             <version>${log4j.version}</version>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <!-- Pin slf4j-api 2.x explicitly (HAPI 8.x requires it). -->
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.16</version>
         </dependency>
         <!-- SPRING DEPENDENCIES -->
         <dependency>
