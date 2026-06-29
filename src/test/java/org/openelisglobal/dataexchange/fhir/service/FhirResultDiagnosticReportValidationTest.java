@@ -139,8 +139,7 @@ public class FhirResultDiagnosticReportValidationTest {
         when(testService.get("1")).thenReturn(test);
         when(resultService.getResultsByAnalysis(analysis)).thenReturn(List.of(result));
         when(resultService.getUOM(result)).thenReturn("g/dL");
-        // A human patient on the sample (so the Observation carries a subject reference;
-        // environmental samples have none — OGC-356).
+        // A human patient on the sample, so the Observation carries a subject.
         Patient patient = mock(Patient.class);
         when(patient.getFhirUuidAsString()).thenReturn("44444444-4444-4444-4444-444444444444");
         when(sampleHumanService.getPatientForSample(sample)).thenReturn(patient);
@@ -155,8 +154,7 @@ public class FhirResultDiagnosticReportValidationTest {
         assertEquals(ObservationStatus.FINAL, observation.getStatus());
         assertEquals(DiagnosticReportStatus.FINAL, diagnosticReport.getStatus());
 
-        // AC1 content (not just $validate-clean / status): the analyte's LOINC code, the
-        // value as a UCUM-unit Quantity, and the Patient subject reference are populated.
+        // AC1 content: LOINC code, UCUM value quantity, and Patient subject.
         assertEquals("http://loinc.org", observation.getCode().getCodingFirstRep().getSystem());
         assertEquals("718-7", observation.getCode().getCodingFirstRep().getCode());
         assertEquals(12.5, observation.getValueQuantity().getValue().doubleValue(), 1e-9);
