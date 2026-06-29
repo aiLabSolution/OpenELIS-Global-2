@@ -2,10 +2,12 @@ package org.openelisglobal.result.ingest;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -43,10 +45,12 @@ import org.springframework.beans.factory.annotation.Autowired;
  * auto-appended version 1 (the {@code result_append_version} trigger, LIS-7 /
  * S0.5), and that version is immutable — a direct mutation is rejected by the
  * append-only guard, so the ingest landed in a no-last-writer-wins spine.</li>
- * <li><b>Tolerant ingest.</b> A partially-normalized observation (unmapped
- * code, no LOINC) still persists — raw captured, normalized columns null,
- * status {@code PARTIAL} — mirroring the edge normalizer's status
- * vocabulary.</li>
+ * <li><b>Tolerant ingest, on the real wire shape.</b> A partially-normalized
+ * observation parsed from the <em>actual edge-emitted JSON</em> (not a hand-built
+ * value object) still persists — raw captured; an unmapped LOINC persists as the
+ * edge's empty string {@code ""} (never null — the edge cannot emit null per the
+ * shared {@code ingest-contract.schema.json}); a mapped UCUM unit is populated;
+ * status {@code PARTIAL} — mirroring the edge normalizer's status vocabulary.</li>
  * </ol>
  *
  * <p>
@@ -117,9 +121,15 @@ public class ResultIngestContractIntegrationTest extends BaseWebContextSensitive
     }
 
     @Test
-    public void ingestToleratesAPartiallyNormalizedObservation() throws Exception {
-        // an unmapped observation (edge status PARTIAL): raw captured, no LOINC/UCUM.
-        NormalizedObservation observation = new NormalizedObservation("6.1", "99XYZ", "K/uL", null, null, "PARTIAL");
+    public void ingestPersistsUnmappedLoincAsEmptyString_fromTheEmittedJson() throws Exception {
+        // Drive the contract with the ACTUAL edge-emitted JSON (not a hand-built VO), so
+        // the empty-string-vs-null representation of the seam is asserted on the real
+        // wire shape. Per the shared contract (edge/sim/fixtures/schema/ingest-contract
+        // .schema.json: loinc/ucumValue are type "string", "empty string when unmapped"),
+        // an unmapped code is "" — never null; the edge cannot emit null. This is a
+        // partial normalization: the code 99XYZ is unmapped (loinc ""), but the unit
+        // K/uL maps to UCUM 10*3/uL (so ucumValue is populated, not "").
+        NormalizedObservation observation = readEmittedDto("edge-emitted-unmapped.json");
 
         String resultId = resultIngestService.ingest(observation);
         assertNotNull(resultId);
@@ -132,9 +142,27 @@ public class ResultIngestContractIntegrationTest extends BaseWebContextSensitive
             assertTrue("the ingested result row must exist", rs.next());
             assertEquals("raw analyzer code preserved", "99XYZ", rs.getString("raw_code"));
             assertEquals("raw analyzer unit preserved", "K/uL", rs.getString("raw_unit"));
-            assertNull("no LOINC for an unmapped code", rs.getString("loinc"));
-            assertNull("no UCUM for an unmapped unit", rs.getString("ucum_value"));
+            // The contract: an unmapped LOINC persists as "" (the edge wire value), NOT
+            // null — feeding the emitted JSON is what catches this seam drift.
+            assertEquals("unmapped LOINC persists as the edge's empty string, not null", "",
+                    rs.getString("loinc"));
+            assertEquals("the mapped UCUM unit persists", "10*3/uL", rs.getString("ucum_value"));
             assertEquals("status carried from the edge normalizer", "PARTIAL", rs.getString("status"));
+        }
+    }
+
+    /**
+     * Parse a committed edge-emitted ingest-contract DTO (the JSON the edge actually
+     * sends, per {@code ingest-contract.schema.json}) into a {@link NormalizedObservation}
+     * — so the test asserts the real wire shape rather than a hand-built value object.
+     */
+    private NormalizedObservation readEmittedDto(String resource) throws Exception {
+        try (InputStream in = getClass().getResourceAsStream(resource)) {
+            assertNotNull("missing edge-emitted contract fixture: " + resource, in);
+            JsonNode dto = new ObjectMapper().readTree(in);
+            return new NormalizedObservation(dto.get("value").asText(), dto.get("rawCode").asText(),
+                    dto.get("rawUnit").asText(), dto.get("loinc").asText(), dto.get("ucumValue").asText(),
+                    dto.get("status").asText());
         }
     }
 
