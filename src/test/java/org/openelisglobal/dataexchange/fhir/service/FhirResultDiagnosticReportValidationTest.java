@@ -33,6 +33,7 @@ import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.dataexchange.fhir.FhirConfig;
 import org.openelisglobal.localization.valueholder.Localization;
+import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.result.service.ResultService;
 import org.openelisglobal.result.valueholder.Result;
 import org.openelisglobal.sample.valueholder.Sample;
@@ -138,7 +139,10 @@ public class FhirResultDiagnosticReportValidationTest {
         when(testService.get("1")).thenReturn(test);
         when(resultService.getResultsByAnalysis(analysis)).thenReturn(List.of(result));
         when(resultService.getUOM(result)).thenReturn("g/dL");
-        when(sampleHumanService.getPatientForSample(sample)).thenReturn(null);
+        // A human patient on the sample, so the Observation carries a subject.
+        Patient patient = mock(Patient.class);
+        when(patient.getFhirUuidAsString()).thenReturn("44444444-4444-4444-4444-444444444444");
+        when(sampleHumanService.getPatientForSample(sample)).thenReturn(patient);
         // facilityOrganizationService.getFacilityId() defaults to null -> no facility
         // identifier.
 
@@ -149,6 +153,13 @@ public class FhirResultDiagnosticReportValidationTest {
         // A finalized result is FINAL on both resources (the slice's premise).
         assertEquals(ObservationStatus.FINAL, observation.getStatus());
         assertEquals(DiagnosticReportStatus.FINAL, diagnosticReport.getStatus());
+
+        // AC1 content: LOINC code, UCUM value quantity, and Patient subject.
+        assertEquals("http://loinc.org", observation.getCode().getCodingFirstRep().getSystem());
+        assertEquals("718-7", observation.getCode().getCodingFirstRep().getCode());
+        assertEquals(12.5, observation.getValueQuantity().getValue().doubleValue(), 1e-9);
+        assertEquals("g/dL", observation.getValueQuantity().getUnit());
+        assertEquals("Patient/44444444-4444-4444-4444-444444444444", observation.getSubject().getReference());
 
         // The acceptance gate: both pass FHIR R4 instance validation ($validate).
         assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));

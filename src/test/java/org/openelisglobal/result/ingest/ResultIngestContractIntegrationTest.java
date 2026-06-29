@@ -2,10 +2,12 @@ package org.openelisglobal.result.ingest;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -43,10 +45,13 @@ import org.springframework.beans.factory.annotation.Autowired;
  * auto-appended version 1 (the {@code result_append_version} trigger, LIS-7 /
  * S0.5), and that version is immutable — a direct mutation is rejected by the
  * append-only guard, so the ingest landed in a no-last-writer-wins spine.</li>
- * <li><b>Tolerant ingest.</b> A partially-normalized observation (unmapped
- * code, no LOINC) still persists — raw captured, normalized columns null,
- * status {@code PARTIAL} — mirroring the edge normalizer's status
- * vocabulary.</li>
+ * <li><b>Tolerant ingest, on the real wire shape.</b> A partially-normalized
+ * observation parsed from the <em>actual edge-emitted JSON</em> (not a
+ * hand-built value object) still persists — raw captured; an unmapped LOINC
+ * persists as the edge's empty string {@code ""} (never null — the edge cannot
+ * emit null per the shared {@code ingest-contract.schema.json}); a mapped UCUM
+ * unit is populated; status {@code PARTIAL} — mirroring the edge normalizer's
+ * status vocabulary.</li>
  * </ol>
  *
  * <p>
@@ -117,9 +122,9 @@ public class ResultIngestContractIntegrationTest extends BaseWebContextSensitive
     }
 
     @Test
-    public void ingestToleratesAPartiallyNormalizedObservation() throws Exception {
-        // an unmapped observation (edge status PARTIAL): raw captured, no LOINC/UCUM.
-        NormalizedObservation observation = new NormalizedObservation("6.1", "99XYZ", "K/uL", null, null, "PARTIAL");
+    public void ingestPersistsUnmappedLoincAsEmptyString_fromTheEmittedJson() throws Exception {
+        // Drive the contract from the real edge-emitted JSON.
+        NormalizedObservation observation = readEmittedDto("edge-emitted-unmapped.json");
 
         String resultId = resultIngestService.ingest(observation);
         assertNotNull(resultId);
@@ -132,9 +137,25 @@ public class ResultIngestContractIntegrationTest extends BaseWebContextSensitive
             assertTrue("the ingested result row must exist", rs.next());
             assertEquals("raw analyzer code preserved", "99XYZ", rs.getString("raw_code"));
             assertEquals("raw analyzer unit preserved", "K/uL", rs.getString("raw_unit"));
-            assertNull("no LOINC for an unmapped code", rs.getString("loinc"));
-            assertNull("no UCUM for an unmapped unit", rs.getString("ucum_value"));
+            // An unmapped LOINC persists as "" (the edge wire value), never null.
+            assertEquals("unmapped LOINC persists as the edge's empty string, not null", "", rs.getString("loinc"));
+            assertEquals("the mapped UCUM unit persists", "10*3/uL", rs.getString("ucum_value"));
             assertEquals("status carried from the edge normalizer", "PARTIAL", rs.getString("status"));
+        }
+    }
+
+    // Parse a committed edge-emitted ingest DTO into a NormalizedObservation.
+    private NormalizedObservation readEmittedDto(String resource) throws Exception {
+        try (InputStream in = getClass().getResourceAsStream(resource)) {
+            assertNotNull("missing edge-emitted contract fixture: " + resource, in);
+            JsonNode dto = new ObjectMapper().readTree(in);
+            String value = dto.get("value").asText();
+            String rawCode = dto.get("rawCode").asText();
+            String rawUnit = dto.get("rawUnit").asText();
+            String loinc = dto.get("loinc").asText();
+            String ucumValue = dto.get("ucumValue").asText();
+            String status = dto.get("status").asText();
+            return new NormalizedObservation(value, rawCode, rawUnit, loinc, ucumValue, status);
         }
     }
 
