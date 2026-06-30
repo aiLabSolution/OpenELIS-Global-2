@@ -129,4 +129,7 @@
   <!-- LIS-8 / S0.6: LOINC/UCUM reference seed + analyzer vendor-code -> LOINC/UCUM normalization mapping -->
   <include relativeToChangelogFile="true" file="048-loinc-ucum-seed.xml"/>
 
+  <!-- LIS-86 / S2.10: Seamaty SD1 biochem code -> LOINC seed (analyzer + per-code AnalyzerTestMapping + Test.loinc) -->
+  <include relativeToChangelogFile="true" file="049-sd1-loinc-seed.xml"/>
+
 </databaseChangeLog>

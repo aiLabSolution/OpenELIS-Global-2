@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-86 / S2.10 — Seamaty SD1 biochem code -> LOINC production seed   -->
+    <!--                                                                    -->
+    <!-- The Seamaty SD1 dry-chem analyzer attaches to the openelis-analyzer- -->
+    <!-- bridge (HL7 ORU^R01 over MLLP). The bridge owns analyzer-code↔LOINC  -->
+    <!-- translation: on registration OE2 pushes a test_code -> LOINC map     -->
+    <!-- (BridgeRegistrationService.attachTestCodeLoinc), built from the      -->
+    <!-- analyzer's AnalyzerTestMapping rows (analyzer_test_name -> test_id)  -->
+    <!-- joined to Test.loinc. OE2's inbound FHIR ingest then binds results   -->
+    <!-- by LOINC only (AnalyzerFhirImportController.resolveLoincTest ->      -->
+    <!-- TestService.getTestsByLoincCode). So BOTH directions need Test.loinc -->
+    <!-- populated on a real clinlims.test row, plus the SD1 analyzer and its  -->
+    <!-- 6 code mappings.                                                     -->
+    <!--                                                                    -->
+    <!-- The 6 SD1 codes (OBX-3.1, verified against the bridge SD1 fixture +  -->
+    <!-- the edge/sim Seamaty maps) and their LOINCs:                         -->
+    <!--   GLU  -> 2345-7  (Glucose [Mass/vol], Ser/Plas)                     -->
+    <!--   BUN  -> 3094-0  (Urea nitrogen, Ser/Plas)                          -->
+    <!--   CREA -> 2160-0  (Creatinine, Ser/Plas)                            -->
+    <!--   AST  -> 1920-8  (Aspartate aminotransferase)                       -->
+    <!--   ALT  -> 1742-6  (Alanine aminotransferase)                         -->
+    <!--   TP   -> 2885-2  (Protein, total, Ser/Plas)                         -->
+    <!--                                                                    -->
+    <!-- U/L -> UCUM on the FHIR Quantity is NOT seeded here: the bridge has  -->
+    <!-- no unit->UCUM model yet (a new AnalyzerEntry.unitToUcum push field). -->
+    <!-- That is LIS-87 (bridge↔sim cross-contract).                          -->
+    <!--                                                                    -->
+    <!-- All changesets are idempotent (preConditions / NOT EXISTS guards),   -->
+    <!-- ship to every environment (no context attribute, like 048 — so they  -->
+    <!-- reach the integration-test harness), and each has an explicit         -->
+    <!-- rollback. The seed reuses an existing chem Test row when present      -->
+    <!-- (Glucose/Creatinine in the demo catalog) and inserts a minimal row    -->
+    <!-- otherwise, so it is correct on both a demo and a clean install. The   -->
+    <!-- analyzer is seeded in SETUP status with no transport (ip/port) — the  -->
+    <!-- operator configures the transport at deploy ("config, no redeploy");  -->
+    <!-- this seed provides only the LOINC binding.                            -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis86-001-set-loinc-existing-chem-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <columnExists schemaName="clinlims" tableName="test" columnName="loinc"/>
+        </preConditions>
+        <comment>Set the SD1-panel LOINC on existing chemistry Test rows (Glucose, Creatinine) where unset (LIS-86).</comment>
+        <sql>
+            UPDATE clinlims.test SET loinc = '2345-7', lastupdated = now()
+                WHERE name = 'Glucose' AND (loinc IS NULL OR loinc = '');
+            UPDATE clinlims.test SET loinc = '2160-0', lastupdated = now()
+                WHERE name = 'Creatinine' AND (loinc IS NULL OR loinc = '');
+        </sql>
+        <rollback>
+            <sql>
+                UPDATE clinlims.test SET loinc = NULL WHERE name = 'Glucose' AND loinc = '2345-7';
+                UPDATE clinlims.test SET loinc = NULL WHERE name = 'Creatinine' AND loinc = '2160-0';
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis86-002-insert-missing-chem-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <columnExists schemaName="clinlims" tableName="test" columnName="loinc"/>
+        </preConditions>
+        <comment>Insert any SD1-panel chemistry Test row whose LOINC is not yet present (AST/ALT/TP/BUN always; Glucose/Creatinine only on a clean, non-demo install). Section is reused from the Glucose row when available (LIS-86).</comment>
+        <sql>
+            INSERT INTO clinlims.test (id, name, description, loinc, is_active, orderable, test_section_id, guid, lastupdated)
+            SELECT nextval('clinlims.test_seq'), v.name, v.name, v.loinc, 'Y', true,
+                   (SELECT t2.test_section_id FROM clinlims.test t2 WHERE t2.name = 'Glucose' AND t2.test_section_id IS NOT NULL LIMIT 1),
+                   gen_random_uuid()::varchar, now()
+            FROM (VALUES
+                    ('Glucose',                     '2345-7'),
+                    ('Blood Urea Nitrogen',         '3094-0'),
+                    ('Creatinine',                  '2160-0'),
+                    ('Aspartate Aminotransferase',  '1920-8'),
+                    ('Alanine Aminotransferase',    '1742-6'),
+                    ('Total Protein',               '2885-2')
+                 ) AS v(name, loinc)
+            WHERE NOT EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.test
+                    WHERE name IN ('Blood Urea Nitrogen', 'Aspartate Aminotransferase', 'Alanine Aminotransferase', 'Total Protein')
+                    AND loinc IN ('3094-0', '1920-8', '1742-6', '2885-2');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis86-003-insert-seamaty-sd1-analyzer" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer"/>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'Seamaty SD1'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Seed the Seamaty SD1 analyzer (SETUP status, HL7 v2.3.1; transport configured by the operator at deploy) (LIS-86).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer (id, name, description, is_active, status, protocol_version, last_updated)
+            VALUES (nextval('clinlims.analyzer_seq'), 'Seamaty SD1', 'Seamaty SD1 dry-chem biochemistry analyzer', true, 'SETUP', 'HL7_V2_3_1', now());
+        </sql>
+        <rollback>
+            <sql>DELETE FROM clinlims.analyzer WHERE name = 'Seamaty SD1';</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis86-004-map-sd1-codes-to-loinc-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'Seamaty SD1'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the 6 SD1 analyzer codes (OBX-3.1) to the OE Test carrying each LOINC, so attachTestCodeLoinc emits the code->LOINC pairs the bridge applies (LIS-86).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, v.code,
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   now()
+            FROM clinlims.analyzer a
+            CROSS JOIN (VALUES
+                    ('GLU',  '2345-7'),
+                    ('BUN',  '3094-0'),
+                    ('CREA', '2160-0'),
+                    ('AST',  '1920-8'),
+                    ('ALT',  '1742-6'),
+                    ('TP',   '2885-2')
+                 ) AS v(code, loinc)
+            WHERE a.name = 'Seamaty SD1'
+              AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+              AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_test_map m
+                    WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                    WHERE analyzer_test_name IN ('GLU', 'BUN', 'CREA', 'AST', 'ALT', 'TP')
+                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'Seamaty SD1');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
