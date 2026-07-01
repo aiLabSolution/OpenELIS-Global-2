@@ -1,0 +1,161 @@
+{
+  "$schema": "https://openelis-global.org/schemas/analyzer-defaults/1.0",
+  "profileMeta": {
+    "id": "seamaty-sd1",
+    "version": "1.0.0",
+    "displayName": "Seamaty SD1",
+    "manufacturer": "Seamaty",
+    "confidence": "VALIDATED",
+    "status": "READY"
+  },
+  "analyzer_name": "SMT-SD1",
+  "manufacturer": "Seamaty",
+  "category": "CHEMISTRY",
+  "protocol": {
+    "name": "HL7",
+    "version": "2.3.1"
+  },
+  "identifier_pattern": "^SMT-SD1$",
+  "transport": [
+    "TCP/IP"
+  ],
+  "transport_config": {
+    "TCP/IP": {
+      "default_port": 2575,
+      "framing": "MLLP"
+    }
+  },
+  "communication": {
+    "mode": "ANALYZER_INITIATED",
+    "supports_lis_initiated": false,
+    "notes": "Live SD1 bench upload sends ORU^R01 over MLLP with MSH-3=SMT and MSH-4=SD1. OpenELIS matches the instrument by ^SMT-SD1$ and pushes code-to-LOINC mappings during bridge registration."
+  },
+  "msh3_pattern": "SMT",
+  "msh4_pattern": "SD1",
+  "default_test_mappings": [
+    {
+      "test_code": "LDL",
+      "test_name_hint": "LDL Cholesterol",
+      "loinc": "22748-8",
+      "unit": "mmol/L"
+    },
+    {
+      "test_code": "AMY",
+      "test_name_hint": "Amylase",
+      "loinc": "1798-8",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "GLU",
+      "test_name_hint": "Glucose",
+      "loinc": "2345-7",
+      "unit": "mg/dL"
+    },
+    {
+      "test_code": "TB",
+      "test_name_hint": "Total Bilirubin",
+      "loinc": "14631-6",
+      "unit": "umol/L"
+    },
+    {
+      "test_code": "TC",
+      "test_name_hint": "Total Cholesterol",
+      "loinc": "2093-3",
+      "unit": "mg/dL"
+    },
+    {
+      "test_code": "TG",
+      "test_name_hint": "Triglycerides",
+      "loinc": "2571-8",
+      "unit": "mg/dL"
+    },
+    {
+      "test_code": "DB",
+      "test_name_hint": "Direct Bilirubin",
+      "loinc": "14629-0",
+      "unit": "umol/L"
+    },
+    {
+      "test_code": "CHE",
+      "test_name_hint": "Cholinesterase",
+      "loinc": "2098-2",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "ALB",
+      "test_name_hint": "Albumin",
+      "loinc": "1751-7",
+      "unit": "g/L"
+    },
+    {
+      "test_code": "ALP",
+      "test_name_hint": "Alkaline Phosphatase",
+      "loinc": "6768-6",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "TP",
+      "test_name_hint": "Total Protein",
+      "loinc": "2885-2",
+      "unit": "g/L"
+    },
+    {
+      "test_code": "CK",
+      "test_name_hint": "Creatine Kinase",
+      "loinc": "2157-6",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "GGT",
+      "test_name_hint": "Gamma-Glutamyl Transferase",
+      "loinc": "2324-2",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "HDL",
+      "test_name_hint": "HDL Cholesterol",
+      "loinc": "2085-9",
+      "unit": "mg/dL"
+    },
+    {
+      "test_code": "BUN",
+      "test_name_hint": "Blood Urea Nitrogen",
+      "loinc": "3094-0",
+      "unit": "mg/dL"
+    },
+    {
+      "test_code": "UA",
+      "test_name_hint": "Uric Acid",
+      "loinc": "3084-1",
+      "unit": "mg/dL"
+    },
+    {
+      "test_code": "TBA",
+      "test_name_hint": "Total Bile Acids",
+      "loinc": "14628-2",
+      "unit": "umol/L"
+    },
+    {
+      "test_code": "AST",
+      "test_name_hint": "Aspartate Aminotransferase",
+      "loinc": "1920-8",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "ALT",
+      "test_name_hint": "Alanine Aminotransferase",
+      "loinc": "1742-6",
+      "unit": "U/L"
+    },
+    {
+      "test_code": "Crea",
+      "test_name_hint": "Creatinine",
+      "loinc": "2160-0",
+      "unit": "mg/dL"
+    }
+  ],
+  "configDefaults": {
+    "qcRules": []
+  },
+  "notes": "LOINC choices are aligned to the 2026-07-01 live SD1 bench capture. LDL uses the molar serum/plasma LDL cholesterol term without method-specific calculation because the capture does not prove whether SD1 reports direct or calculated LDL. Crea casing is intentional and must match OBX-3.1 exactly."
+}
