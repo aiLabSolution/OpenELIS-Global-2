@@ -270,9 +270,8 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             Resource resource = entry.getResource();
             if (resource instanceof DiagnosticReport report && report.hasMeta() && report.getMeta().hasTag()) {
                 boolean calibration = report.getMeta().getTag().stream()
-                        .anyMatch(t -> CALIBRATION_TAG.equals(t.getCode())
-                                && (t.getSystem() == null || t.getSystem().isBlank()
-                                        || OPENELIS_FHIR_TAG_SYSTEM.equals(t.getSystem())));
+                        .anyMatch(t -> CALIBRATION_TAG.equals(t.getCode()) && (t.getSystem() == null
+                                || t.getSystem().isBlank() || OPENELIS_FHIR_TAG_SYSTEM.equals(t.getSystem())));
                 if (calibration) {
                     LogEvent.logWarn(CLASS_NAME, "importFhirBundle",
                             "Rejecting calibration DiagnosticReport from analyzer FHIR import");

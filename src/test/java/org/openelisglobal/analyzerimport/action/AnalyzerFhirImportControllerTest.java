@@ -83,17 +83,13 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
 
     @Test
     public void importFhirBundle_CalibrationDiagnosticReport_ReturnsBadRequestAndDoesNotInsert() throws Exception {
-        String bundleJson = "{"
-                + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
                 + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
-                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"SD1-CAL-001\"}]"
-                + "}},"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"SD1-CAL-001\"}]" + "}},"
                 + "{\"resource\":{\"resourceType\":\"DiagnosticReport\","
                 + "\"meta\":{\"tag\":[{\"system\":\"http://openelis-global.org/fhir/tags\",\"code\":\"CALIBRATION\"}]},"
                 + "\"status\":\"preliminary\",\"code\":{\"text\":\"Analyzer Results\"},"
-                + "\"specimen\":[{\"reference\":\"urn:uuid:specimen-1\"}]"
-                + "}}"
-                + "]}";
+                + "\"specimen\":[{\"reference\":\"urn:uuid:specimen-1\"}]" + "}}" + "]}";
 
         mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false))
