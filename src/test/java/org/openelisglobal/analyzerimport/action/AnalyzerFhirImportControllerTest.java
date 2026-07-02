@@ -142,6 +142,45 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
 
     @Test
     @SuppressWarnings("unchecked")
+    public void importFhirBundle_MappedQcResult_IsReadOnlyToBlockPatientAccept() throws Exception {
+        // A QC (MSH-16=2) result that DOES resolve to a test (seeded LOINC 2345-7 /
+        // GLU)
+        // must be marked read-only at ingest so the analyzer-results accept path
+        // (AnalyzerResultsAcceptServiceImpl skips read-only items) can never carry a
+        // control into a patient Result/Analysis. Without the guard a mapped control
+        // row
+        // has readOnly=false and is acceptable as a patient result, since the
+        // bundle-level
+        // calibration reject only covers MSH-16=1 and per-item readOnly excludes
+        // isControl.
+        String bundleJson = "{\n" + "  \"resourceType\": \"Bundle\",\n" + "  \"type\": \"transaction\",\n"
+                + "  \"entry\": [\n" + "    {\n" + "      \"fullUrl\": \"urn:uuid:specimen-1\",\n"
+                + "      \"resource\": {\n" + "        \"resourceType\": \"Specimen\",\n"
+                + "        \"identifier\": [{\"value\": \"CNEG\"}]\n" + "      }\n" + "    },\n" + "    {\n"
+                + "      \"resource\": {\n" + "        \"resourceType\": \"Observation\",\n"
+                + "        \"meta\": {\"tag\": [{\"system\": \"http://openelis-global.org/fhir/tags\", \"code\": \"QC\"}]},\n"
+                + "        \"specimen\": {\"reference\": \"urn:uuid:specimen-1\"},\n"
+                + "        \"code\": {\"coding\": [{\"system\": \"http://loinc.org\", \"code\": \"2345-7\"}]},\n"
+                + "        \"valueQuantity\": {\"value\": 95, \"unit\": \"mg/dL\"}\n" + "      }\n" + "    }\n"
+                + "  ]\n" + "}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
+        org.junit.Assert.assertEquals(1, inserted.size());
+        AnalyzerResults qc = inserted.get(0);
+        org.junit.Assert.assertNotNull("QC LOINC 2345-7 must resolve to a seeded test (mapped case)", qc.getTestId());
+        org.junit.Assert.assertTrue("QC tag should map to isControl=true", qc.getIsControl());
+        org.junit.Assert.assertTrue("mapped QC result must be read-only so it cannot be accepted as a patient result",
+                qc.isReadOnly());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     public void importFhirBundle_MissingAnalyzerRowForNumericHeader_StillStagesResult() throws Exception {
         when(analyzerService.get("999")).thenThrow(new org.hibernate.ObjectNotFoundException("999",
                 org.openelisglobal.analyzer.valueholder.Analyzer.class.getName()));

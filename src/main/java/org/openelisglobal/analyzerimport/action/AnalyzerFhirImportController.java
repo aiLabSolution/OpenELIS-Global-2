@@ -426,10 +426,20 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             return null;
         }
 
-        // QC/control flag from bridge tag
+        // QC/control flag from bridge tag. QC (MSH-16=2) rows are staged for the
+        // Westgard pipeline and audit trail, but marked read-only so the analyzer-
+        // results accept path (AnalyzerResultsAcceptServiceImpl#buildSampleGroupings
+        // skips read-only items) can never carry a control into a patient
+        // Result/Analysis. The bundle-level calibration reject above only covers
+        // MSH-16=1, so QC needs its own fail-closed guard here — otherwise a mapped
+        // control row (testId resolved, readOnly=false) is acceptable as a patient
+        // result, since per-item readOnly does not incorporate isControl (LIS-95).
         if (obs.hasMeta() && obs.getMeta().hasTag()) {
             boolean isQc = obs.getMeta().getTag().stream().anyMatch(t -> "QC".equals(t.getCode()));
             ar.setIsControl(isQc);
+            if (isQc) {
+                ar.setReadOnly(true);
+            }
         }
 
         // QC metadata from bridge extensions — used by
