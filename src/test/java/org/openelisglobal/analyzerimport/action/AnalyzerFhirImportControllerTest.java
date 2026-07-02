@@ -25,6 +25,7 @@ import org.openelisglobal.analyzer.valueholder.Analyzer;
 import org.openelisglobal.analyzer.valueholder.Analyzer.AnalyzerStatus;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsService;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
+import org.openelisglobal.test.service.TestService;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -37,9 +38,13 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
     @Mock
     private AnalyzerService analyzerService;
 
+    @Mock
+    private TestService testService;
+
     private AnalyzerFhirImportController controller;
     private Object originalAnalyzerResultsService;
     private Object originalAnalyzerService;
+    private Object originalTestService;
     private Object originalFhirContext;
 
     @Before
@@ -50,9 +55,11 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         controller = webApplicationContext.getBean(AnalyzerFhirImportController.class);
         originalAnalyzerResultsService = ReflectionTestUtils.getField(controller, "analyzerResultsService");
         originalAnalyzerService = ReflectionTestUtils.getField(controller, "analyzerService");
+        originalTestService = ReflectionTestUtils.getField(controller, "testService");
         originalFhirContext = ReflectionTestUtils.getField(controller, "fhirContext");
         ReflectionTestUtils.setField(controller, "analyzerResultsService", analyzerResultsService);
         ReflectionTestUtils.setField(controller, "analyzerService", analyzerService);
+        ReflectionTestUtils.setField(controller, "testService", testService);
         ReflectionTestUtils.setField(controller, "fhirContext", FhirContext.forR4());
     }
 
@@ -60,6 +67,7 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
     public void tearDown() {
         ReflectionTestUtils.setField(controller, "analyzerResultsService", originalAnalyzerResultsService);
         ReflectionTestUtils.setField(controller, "analyzerService", originalAnalyzerService);
+        ReflectionTestUtils.setField(controller, "testService", originalTestService);
         ReflectionTestUtils.setField(controller, "fhirContext", originalFhirContext);
     }
 
@@ -143,16 +151,19 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
     @Test
     @SuppressWarnings("unchecked")
     public void importFhirBundle_MappedQcResult_IsReadOnlyToBlockPatientAccept() throws Exception {
-        // A QC (MSH-16=2) result that DOES resolve to a test (seeded LOINC 2345-7 /
-        // GLU)
-        // must be marked read-only at ingest so the analyzer-results accept path
-        // (AnalyzerResultsAcceptServiceImpl skips read-only items) can never carry a
-        // control into a patient Result/Analysis. Without the guard a mapped control
-        // row
-        // has readOnly=false and is acceptable as a patient result, since the
-        // bundle-level
-        // calibration reject only covers MSH-16=1 and per-item readOnly excludes
-        // isControl.
+        // A QC (MSH-16=2) result that DOES resolve to a test (mapped case) must be
+        // marked read-only at ingest so the accept path
+        // (AnalyzerResultsAcceptServiceImpl
+        // skips read-only items) can never carry a control into a patient
+        // Result/Analysis. Without the guard a mapped control row has readOnly=false
+        // and
+        // is acceptable as a patient result: the bundle-level calibration reject only
+        // covers MSH-16=1, and per-item readOnly does not incorporate isControl.
+        org.openelisglobal.test.valueholder.Test glucose = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(glucose.getId()).thenReturn("55");
+        when(testService.getTestsByLoincCode("2345-7")).thenReturn(List.of(glucose));
+
         String bundleJson = "{\n" + "  \"resourceType\": \"Bundle\",\n" + "  \"type\": \"transaction\",\n"
                 + "  \"entry\": [\n" + "    {\n" + "      \"fullUrl\": \"urn:uuid:specimen-1\",\n"
                 + "      \"resource\": {\n" + "        \"resourceType\": \"Specimen\",\n"
@@ -173,7 +184,7 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
         org.junit.Assert.assertEquals(1, inserted.size());
         AnalyzerResults qc = inserted.get(0);
-        org.junit.Assert.assertNotNull("QC LOINC 2345-7 must resolve to a seeded test (mapped case)", qc.getTestId());
+        org.junit.Assert.assertEquals("QC LOINC 2345-7 must resolve to the mapped test", "55", qc.getTestId());
         org.junit.Assert.assertTrue("QC tag should map to isControl=true", qc.getIsControl());
         org.junit.Assert.assertTrue("mapped QC result must be read-only so it cannot be accepted as a patient result",
                 qc.isReadOnly());
