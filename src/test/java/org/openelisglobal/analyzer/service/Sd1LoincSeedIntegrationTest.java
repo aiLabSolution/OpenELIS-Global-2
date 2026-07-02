@@ -17,9 +17,9 @@ import org.openelisglobal.test.service.TestService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * LIS-86 / S2.10 — verifies the Seamaty SD1 biochem code -> LOINC seed
- * (Liquibase changeset {@code 049-sd1-loinc-seed.xml}) against the migrated
- * schema.
+ * LIS-86 / LIS-92 — verifies the Seamaty SD1 biochem code -> LOINC seed
+ * (Liquibase changesets {@code 049-sd1-loinc-seed.xml} and
+ * {@code 050-sd1-live-chemistry-seed.xml}) against the migrated schema.
  *
  * <p>
  * The seed's own rows land in <b>canonical</b> tables ({@code test},
@@ -32,31 +32,47 @@ import org.springframework.beans.factory.annotation.Autowired;
  * <i>are</i> reliable here:
  *
  * <ol>
- * <li><b>The seed executed.</b> All four {@code lis86-*} changesets are
- * recorded {@code EXECUTED} in {@code databasechangelog} (liquibase's own
- * tracking table, which fixtures never reset) — proving 049 is wired into the
- * changelog and applied cleanly in a from-scratch migration.</li>
+ * <li><b>The seeds executed.</b> All {@code lis86-*} and {@code lis92-*}
+ * changesets are recorded {@code EXECUTED} in {@code databasechangelog}
+ * (liquibase's own tracking table, which fixtures never reset) — proving 049
+ * and 050 are wired into the changelog and applied cleanly in a from-scratch
+ * migration.</li>
  * <li><b>The production resolver works over the real DB.</b> With a fixture
- * analyzer + six code mappings + six LOINC-carrying Test rows shaped exactly
- * like 049's output, {@link BridgeRegistrationService#attachTestCodeLoinc} (the
- * map OE2 pushes so the bridge can LOINC-code each Observation) yields exactly
- * the six SD1 code -> LOINC pairs, and each LOINC resolves via
+ * analyzer + twenty live SD1 code mappings + twenty LOINC-carrying Test rows
+ * shaped like the seeded output,
+ * {@link BridgeRegistrationService#attachTestCodeLoinc} (the map OE2 pushes so
+ * the bridge can LOINC-code each Observation) yields exactly the live SD1 code
+ * -> LOINC pairs, and each LOINC resolves via
  * {@code TestService.getTestsByLoincCode} — exercising the real DAO / HQL /
  * numeric-string-converter / Test.loinc chain the mock unit test cannot.</li>
  * </ol>
  */
 public class Sd1LoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
 
-    /** SD1 wire code (OBX-3.1) -> target LOINC, in panel order. */
+    /** Live SD1 wire code (OBX-3.1) -> target LOINC, in panel order. */
     private static final Map<String, String> SD1_CODE_TO_LOINC = new LinkedHashMap<>();
 
     static {
+        SD1_CODE_TO_LOINC.put("LDL", "22748-8");
+        SD1_CODE_TO_LOINC.put("AMY", "1798-8");
         SD1_CODE_TO_LOINC.put("GLU", "2345-7");
+        SD1_CODE_TO_LOINC.put("TB", "14631-6");
+        SD1_CODE_TO_LOINC.put("TC", "2093-3");
+        SD1_CODE_TO_LOINC.put("TG", "2571-8");
+        SD1_CODE_TO_LOINC.put("DB", "14629-0");
+        SD1_CODE_TO_LOINC.put("CHE", "2098-2");
+        SD1_CODE_TO_LOINC.put("ALB", "1751-7");
+        SD1_CODE_TO_LOINC.put("ALP", "6768-6");
+        SD1_CODE_TO_LOINC.put("TP", "2885-2");
+        SD1_CODE_TO_LOINC.put("CK", "2157-6");
+        SD1_CODE_TO_LOINC.put("GGT", "2324-2");
+        SD1_CODE_TO_LOINC.put("HDL", "2085-9");
         SD1_CODE_TO_LOINC.put("BUN", "3094-0");
-        SD1_CODE_TO_LOINC.put("CREA", "2160-0");
+        SD1_CODE_TO_LOINC.put("UA", "3084-1");
+        SD1_CODE_TO_LOINC.put("TBA", "14628-2");
         SD1_CODE_TO_LOINC.put("AST", "1920-8");
         SD1_CODE_TO_LOINC.put("ALT", "1742-6");
-        SD1_CODE_TO_LOINC.put("TP", "2885-2");
+        SD1_CODE_TO_LOINC.put("Crea", "2160-0");
     }
 
     /** Synthetic fixture ids, high enough never to collide with catalog data. */
@@ -82,11 +98,19 @@ public class Sd1LoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
             assertEquals("all four lis86 seed changesets (049) must be EXECUTED in the migrated schema", 4,
                     rs.getInt(1));
         }
+        try (Connection conn = dataSource.getConnection();
+                Statement st = conn.createStatement();
+                ResultSet rs = st.executeQuery("SELECT count(*) FROM clinlims.databasechangelog"
+                        + " WHERE id LIKE 'lis92-%' AND exectype = 'EXECUTED'")) {
+            assertTrue(rs.next());
+            assertEquals("all four lis92 seed changesets (050) must be EXECUTED in the migrated schema", 4,
+                    rs.getInt(1));
+        }
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    public void attachTestCodeLoincEmitsTheSixSd1PairsFromRealDb() throws SQLException {
+    public void attachTestCodeLoincEmitsTheLiveSd1PairsFromRealDb() throws SQLException {
         try {
             seedFixture();
 
@@ -95,7 +119,8 @@ public class Sd1LoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
 
             Map<String, String> codeToLoinc = (Map<String, String>) payload.get("testCodeLoinc");
             assertNotNull("attachTestCodeLoinc must always attach a testCodeLoinc map", codeToLoinc);
-            assertEquals("SD1 code -> LOINC map must carry exactly six pairs", 6, codeToLoinc.size());
+            assertEquals("SD1 code -> LOINC map must carry exactly the live panel", SD1_CODE_TO_LOINC.size(),
+                    codeToLoinc.size());
             for (Map.Entry<String, String> e : SD1_CODE_TO_LOINC.entrySet()) {
                 assertEquals("SD1 code " + e.getKey() + " must map to its LOINC", e.getValue(),
                         codeToLoinc.get(e.getKey()));
@@ -108,7 +133,7 @@ public class Sd1LoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
     }
 
     /**
-     * Insert a fixture analyzer + six LOINC-carrying tests + six code mappings
+     * Insert a fixture analyzer + live-panel LOINC-carrying tests + code mappings
      * (auto-committed).
      */
     private void seedFixture() throws SQLException {
@@ -116,9 +141,10 @@ public class Sd1LoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
             // resolve the bare UNACCENT() in the test-table normalized-description trigger
             st.execute("SET search_path TO clinlims, public");
             st.executeUpdate("INSERT INTO clinlims.analyzer"
-                    + " (id, name, description, is_active, status, protocol_version, last_updated) VALUES ("
-                    + FIXTURE_ANALYZER_ID
-                    + ", 'SD1 IT Fixture', 'LIS-86 test fixture', true, 'SETUP', 'HL7_V2_3_1', now())");
+                    + " (id, name, description, is_active, status, protocol_version, identifier_pattern, last_updated)"
+                    + " VALUES (" + FIXTURE_ANALYZER_ID
+                    + ", 'SMT-SD1 IT Fixture', 'LIS-92 test fixture', true, 'SETUP', 'HL7_V2_3_1',"
+                    + " '^SMT-SD1$', now())");
             int i = 0;
             for (Map.Entry<String, String> e : SD1_CODE_TO_LOINC.entrySet()) {
                 long testId = FIXTURE_TEST_BASE_ID + i++;
@@ -141,7 +167,7 @@ public class Sd1LoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
         try (Connection conn = dataSource.getConnection(); Statement st = conn.createStatement()) {
             st.executeUpdate("DELETE FROM clinlims.analyzer_test_map WHERE analyzer_id = " + FIXTURE_ANALYZER_ID);
             st.executeUpdate("DELETE FROM clinlims.test WHERE id BETWEEN " + FIXTURE_TEST_BASE_ID + " AND "
-                    + (FIXTURE_TEST_BASE_ID + 5));
+                    + (FIXTURE_TEST_BASE_ID + SD1_CODE_TO_LOINC.size() - 1));
             st.executeUpdate("DELETE FROM clinlims.analyzer WHERE id = " + FIXTURE_ANALYZER_ID);
         }
     }

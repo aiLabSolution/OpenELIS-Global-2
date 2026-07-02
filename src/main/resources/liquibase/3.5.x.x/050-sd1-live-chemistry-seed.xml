@@ -1,0 +1,452 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-92 / SD1 bench - live Seamaty SD1 chemistry catalog + mappings   -->
+    <!--                                                                    -->
+    <!-- This follows LIS-86's fixture-derived 049 seed. The live SD1 bench   -->
+    <!-- sends MSH-3/4 as SMT/SD1 and is registered in OpenELIS as            -->
+    <!-- SMT-SD1 with identifier_pattern ^SMT-SD1$. Its OBX-3.1 codes are a   -->
+    <!-- 20-test chemistry panel, including mixed-case Crea.                  -->
+    <!--                                                                    -->
+    <!-- 049 is immutable. These changesets reconcile the durable analyzer    -->
+    <!-- identity to the real wire identity, seed missing live-panel Test     -->
+    <!-- rows and serum sample links, then map the exact SD1 OBX codes to the -->
+    <!-- LOINC-bearing Tests used by BridgeRegistrationService.               -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis92-001-seed-sd1-live-units" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="unit_of_measure"/>
+                <columnExists schemaName="clinlims" tableName="unit_of_measure" columnName="code"/>
+                <columnExists schemaName="clinlims" tableName="unit_of_measure" columnName="ucum_code"/>
+            </and>
+        </preConditions>
+        <comment>Ensure live SD1 result units exist as OpenELIS UOM rows with UCUM codes (LIS-92).</comment>
+        <sql>
+            WITH sd1_units(unit_name, unit_code, ucum_code) AS (
+                VALUES
+                    ('mg/dL',  'mg/dL',  'mg/dL'),
+                    ('U/L',    'U/L',    'U/L'),
+                    ('g/L',    'g/L',    'g/L'),
+                    ('mmol/L', 'mmol/L', 'mmol/L'),
+                    ('umol/L', 'umol/L', 'umol/L')
+            )
+            UPDATE clinlims.unit_of_measure u
+               SET code = v.unit_code,
+                   ucum_code = v.ucum_code,
+                   is_active = 'Y',
+                   lastupdated = now()
+              FROM sd1_units v
+             WHERE u.id = (
+                    SELECT min(u2.id) FROM clinlims.unit_of_measure u2
+                     WHERE lower(u2.name) = lower(v.unit_name)
+                        OR lower(u2.description) = lower(v.unit_name));
+
+            WITH sd1_units(unit_name, unit_code, ucum_code) AS (
+                VALUES
+                    ('mg/dL',  'mg/dL',  'mg/dL'),
+                    ('U/L',    'U/L',    'U/L'),
+                    ('g/L',    'g/L',    'g/L'),
+                    ('mmol/L', 'mmol/L', 'mmol/L'),
+                    ('umol/L', 'umol/L', 'umol/L')
+            )
+            INSERT INTO clinlims.unit_of_measure (id, name, description, lastupdated, code, ucum_code, is_active)
+            SELECT nextval('clinlims.unit_of_measure_seq'), v.unit_name, v.unit_name, now(),
+                   v.unit_code, v.ucum_code, 'Y'
+              FROM sd1_units v
+             WHERE NOT EXISTS (
+                    SELECT 1 FROM clinlims.unit_of_measure u
+                     WHERE lower(u.name) = lower(v.unit_name)
+                        OR lower(u.description) = lower(v.unit_name)
+                        OR u.code = v.unit_code);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.unit_of_measure
+                 WHERE name IN ('mmol/L', 'umol/L')
+                   AND code IN ('mmol/L', 'umol/L')
+                   AND ucum_code IN ('mmol/L', 'umol/L');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis92-002-reconcile-sd1-analyzer-identity" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <tableExists schemaName="clinlims" tableName="analyzer"/>
+        </preConditions>
+        <comment>Reconcile the LIS-86 seeded SD1 analyzer to the live SMT-SD1 wire identity and identifier pattern (LIS-92).</comment>
+        <sql>
+            UPDATE clinlims.analyzer
+               SET name = 'SMT-SD1',
+                   description = 'Seamaty SD1 dry-chem biochemistry analyzer',
+                   identifier_pattern = '^SMT-SD1$',
+                   protocol_version = 'HL7_V2_3_1',
+                   communication_mode = COALESCE(communication_mode, 'ANALYZER_INITIATED'),
+                   status = COALESCE(status, 'SETUP'),
+                   is_active = true,
+                   last_updated = now()
+             WHERE name = 'Seamaty SD1'
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer a
+                     WHERE a.name = 'SMT-SD1'
+                        OR a.identifier_pattern = '^SMT-SD1$');
+
+            INSERT INTO clinlims.analyzer
+                (id, name, description, is_active, status, protocol_version, communication_mode,
+                 identifier_pattern, last_updated)
+            SELECT nextval('clinlims.analyzer_seq'), 'SMT-SD1',
+                   'Seamaty SD1 dry-chem biochemistry analyzer', true, 'SETUP',
+                   'HL7_V2_3_1', 'ANALYZER_INITIATED', '^SMT-SD1$', now()
+             WHERE NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer a
+                     WHERE a.name = 'SMT-SD1'
+                        OR a.identifier_pattern = '^SMT-SD1$');
+
+            UPDATE clinlims.analyzer
+               SET identifier_pattern = '^SMT-SD1$',
+                   protocol_version = 'HL7_V2_3_1',
+                   communication_mode = COALESCE(communication_mode, 'ANALYZER_INITIATED'),
+                   status = COALESCE(status, 'SETUP'),
+                   is_active = true,
+                   last_updated = now()
+             WHERE name = 'SMT-SD1'
+                OR identifier_pattern = '^SMT-SD1$';
+
+            UPDATE clinlims.analyzer
+               SET is_active = false,
+                   status = COALESCE(status, 'SETUP'),
+                   last_updated = now()
+             WHERE name = 'Seamaty SD1'
+               AND identifier_pattern IS NULL
+               AND ip_address IS NULL
+               AND port IS NULL
+               AND communication_mode IS NULL
+               AND EXISTS (
+                    SELECT 1 FROM clinlims.analyzer a
+                     WHERE a.name = 'SMT-SD1'
+                        OR a.identifier_pattern = '^SMT-SD1$');
+        </sql>
+        <rollback>
+            <sql>
+                UPDATE clinlims.analyzer
+                   SET name = 'Seamaty SD1',
+                       identifier_pattern = NULL,
+                       last_updated = now()
+                 WHERE name = 'SMT-SD1'
+                   AND ip_address IS NULL
+                   AND port IS NULL;
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis92-003-seed-sd1-live-chemistry-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="test"/>
+                <tableExists schemaName="clinlims" tableName="sampletype_test"/>
+                <tableExists schemaName="clinlims" tableName="type_of_sample"/>
+                <columnExists schemaName="clinlims" tableName="test" columnName="loinc"/>
+            </and>
+        </preConditions>
+        <comment>Seed/complete the live SD1 20-test serum chemistry catalog with LOINC and UOM metadata (LIS-92).</comment>
+        <sql>
+            WITH sd1_tests(code, loinc, unit_name, test_name, report_name, local_code, sort_order, legacy_local_code) AS (
+                VALUES
+                    ('LDL',  '22748-8', 'mmol/L', 'LDL Cholesterol',                    'LDL Cholesterol',       'SD1-LDL-Serum',  200, NULL),
+                    ('AMY',  '1798-8',  'U/L',    'Amylase',                            'Amylase',               'SD1-AMY-Serum',  201, 'Amylase-Serum'),
+                    ('GLU',  '2345-7',  'mg/dL',  'Glucose',                            'Glucose',               'SD1-GLU-Serum',  202, 'Glucose-Plasma'),
+                    ('TB',   '14631-6', 'umol/L', 'Total Bilirubin',                    'Total Bilirubin',       'SD1-TB-Serum',   203, NULL),
+                    ('TC',   '2093-3',  'mg/dL',  'Total Cholesterol',                  'Total Cholesterol',     'SD1-TC-Serum',   204, 'Total cholesterol-Serum'),
+                    ('TG',   '2571-8',  'mg/dL',  'Triglycerides',                      'Triglycerides',         'SD1-TG-Serum',   205, 'Triglicerides-Serum'),
+                    ('DB',   '14629-0', 'umol/L', 'Direct Bilirubin',                   'Direct Bilirubin',      'SD1-DB-Serum',   206, NULL),
+                    ('CHE',  '2098-2',  'U/L',    'Cholinesterase',                     'Cholinesterase',        'SD1-CHE-Serum',  207, NULL),
+                    ('ALB',  '1751-7',  'g/L',    'Albumin',                            'Albumin',               'SD1-ALB-Serum',  208, NULL),
+                    ('ALP',  '6768-6',  'U/L',    'Alkaline Phosphatase',               'ALP',                   'SD1-ALP-Serum',  209, NULL),
+                    ('TP',   '2885-2',  'g/L',    'Total Protein',                      'Total Protein',         'SD1-TP-Serum',   210, NULL),
+                    ('CK',   '2157-6',  'U/L',    'Creatine Kinase',                    'CK',                    'SD1-CK-Serum',   211, NULL),
+                    ('GGT',  '2324-2',  'U/L',    'Gamma-Glutamyl Transferase',         'GGT',                   'SD1-GGT-Serum',  212, NULL),
+                    ('HDL',  '2085-9',  'mg/dL',  'HDL Cholesterol',                    'HDL Cholesterol',       'SD1-HDL-Serum',  213, 'HDL cholesterol-Serum'),
+                    ('BUN',  '3094-0',  'mg/dL',  'Blood Urea Nitrogen',                'BUN',                   'SD1-BUN-Serum',  214, NULL),
+                    ('UA',   '3084-1',  'mg/dL',  'Uric Acid',                          'Uric Acid',             'SD1-UA-Serum',   215, NULL),
+                    ('TBA',  '14628-2', 'umol/L', 'Total Bile Acids',                   'Total Bile Acids',      'SD1-TBA-Serum',  216, NULL),
+                    ('AST',  '1920-8',  'U/L',    'Aspartate Aminotransferase',         'AST',                   'SD1-AST-Serum',  217, 'GOT/ASAT-Serum'),
+                    ('ALT',  '1742-6',  'U/L',    'Alanine Aminotransferase',           'ALT',                   'SD1-ALT-Serum',  218, 'GPT/ALAT-Serum'),
+                    ('Crea', '2160-0',  'mg/dL',  'Creatinine',                         'Creatinine',            'SD1-Crea-Serum', 219, 'Creatinine-Serum')
+            )
+            UPDATE clinlims.test t
+               SET loinc = v.loinc,
+                   uom_id = COALESCE((
+                        SELECT min(u.id) FROM clinlims.unit_of_measure u
+                         WHERE lower(u.name) = lower(v.unit_name)
+                            OR lower(u.description) = lower(v.unit_name)
+                            OR u.code = v.unit_name), t.uom_id),
+                   is_active = 'Y',
+                   orderable = true,
+                   lastupdated = now()
+              FROM sd1_tests v
+             WHERE v.legacy_local_code IS NOT NULL
+               AND t.local_code = v.legacy_local_code
+               AND (t.loinc IS NULL OR t.loinc = '' OR t.loinc = v.loinc);
+
+            WITH sd1_tests(code, loinc, unit_name, test_name, report_name, local_code, sort_order, legacy_local_code) AS (
+                VALUES
+                    ('LDL',  '22748-8', 'mmol/L', 'LDL Cholesterol',                    'LDL Cholesterol',       'SD1-LDL-Serum',  200, NULL),
+                    ('AMY',  '1798-8',  'U/L',    'Amylase',                            'Amylase',               'SD1-AMY-Serum',  201, 'Amylase-Serum'),
+                    ('GLU',  '2345-7',  'mg/dL',  'Glucose',                            'Glucose',               'SD1-GLU-Serum',  202, 'Glucose-Plasma'),
+                    ('TB',   '14631-6', 'umol/L', 'Total Bilirubin',                    'Total Bilirubin',       'SD1-TB-Serum',   203, NULL),
+                    ('TC',   '2093-3',  'mg/dL',  'Total Cholesterol',                  'Total Cholesterol',     'SD1-TC-Serum',   204, 'Total cholesterol-Serum'),
+                    ('TG',   '2571-8',  'mg/dL',  'Triglycerides',                      'Triglycerides',         'SD1-TG-Serum',   205, 'Triglicerides-Serum'),
+                    ('DB',   '14629-0', 'umol/L', 'Direct Bilirubin',                   'Direct Bilirubin',      'SD1-DB-Serum',   206, NULL),
+                    ('CHE',  '2098-2',  'U/L',    'Cholinesterase',                     'Cholinesterase',        'SD1-CHE-Serum',  207, NULL),
+                    ('ALB',  '1751-7',  'g/L',    'Albumin',                            'Albumin',               'SD1-ALB-Serum',  208, NULL),
+                    ('ALP',  '6768-6',  'U/L',    'Alkaline Phosphatase',               'ALP',                   'SD1-ALP-Serum',  209, NULL),
+                    ('TP',   '2885-2',  'g/L',    'Total Protein',                      'Total Protein',         'SD1-TP-Serum',   210, NULL),
+                    ('CK',   '2157-6',  'U/L',    'Creatine Kinase',                    'CK',                    'SD1-CK-Serum',   211, NULL),
+                    ('GGT',  '2324-2',  'U/L',    'Gamma-Glutamyl Transferase',         'GGT',                   'SD1-GGT-Serum',  212, NULL),
+                    ('HDL',  '2085-9',  'mg/dL',  'HDL Cholesterol',                    'HDL Cholesterol',       'SD1-HDL-Serum',  213, 'HDL cholesterol-Serum'),
+                    ('BUN',  '3094-0',  'mg/dL',  'Blood Urea Nitrogen',                'BUN',                   'SD1-BUN-Serum',  214, NULL),
+                    ('UA',   '3084-1',  'mg/dL',  'Uric Acid',                          'Uric Acid',             'SD1-UA-Serum',   215, NULL),
+                    ('TBA',  '14628-2', 'umol/L', 'Total Bile Acids',                   'Total Bile Acids',      'SD1-TBA-Serum',  216, NULL),
+                    ('AST',  '1920-8',  'U/L',    'Aspartate Aminotransferase',         'AST',                   'SD1-AST-Serum',  217, 'GOT/ASAT-Serum'),
+                    ('ALT',  '1742-6',  'U/L',    'Alanine Aminotransferase',           'ALT',                   'SD1-ALT-Serum',  218, 'GPT/ALAT-Serum'),
+                    ('Crea', '2160-0',  'mg/dL',  'Creatinine',                         'Creatinine',            'SD1-Crea-Serum', 219, 'Creatinine-Serum')
+            )
+            UPDATE clinlims.test t
+               SET uom_id = COALESCE((
+                        SELECT min(u.id) FROM clinlims.unit_of_measure u
+                         WHERE lower(u.name) = lower(v.unit_name)
+                            OR lower(u.description) = lower(v.unit_name)
+                            OR u.code = v.unit_name), t.uom_id),
+                   is_active = 'Y',
+                   orderable = true,
+                   lastupdated = now()
+              FROM sd1_tests v
+             WHERE t.loinc = v.loinc;
+
+            WITH sd1_tests(code, loinc, unit_name, test_name, report_name, local_code, sort_order, legacy_local_code) AS (
+                VALUES
+                    ('LDL',  '22748-8', 'mmol/L', 'LDL Cholesterol',                    'LDL Cholesterol',       'SD1-LDL-Serum',  200, NULL),
+                    ('AMY',  '1798-8',  'U/L',    'Amylase',                            'Amylase',               'SD1-AMY-Serum',  201, 'Amylase-Serum'),
+                    ('GLU',  '2345-7',  'mg/dL',  'Glucose',                            'Glucose',               'SD1-GLU-Serum',  202, 'Glucose-Plasma'),
+                    ('TB',   '14631-6', 'umol/L', 'Total Bilirubin',                    'Total Bilirubin',       'SD1-TB-Serum',   203, NULL),
+                    ('TC',   '2093-3',  'mg/dL',  'Total Cholesterol',                  'Total Cholesterol',     'SD1-TC-Serum',   204, 'Total cholesterol-Serum'),
+                    ('TG',   '2571-8',  'mg/dL',  'Triglycerides',                      'Triglycerides',         'SD1-TG-Serum',   205, 'Triglicerides-Serum'),
+                    ('DB',   '14629-0', 'umol/L', 'Direct Bilirubin',                   'Direct Bilirubin',      'SD1-DB-Serum',   206, NULL),
+                    ('CHE',  '2098-2',  'U/L',    'Cholinesterase',                     'Cholinesterase',        'SD1-CHE-Serum',  207, NULL),
+                    ('ALB',  '1751-7',  'g/L',    'Albumin',                            'Albumin',               'SD1-ALB-Serum',  208, NULL),
+                    ('ALP',  '6768-6',  'U/L',    'Alkaline Phosphatase',               'ALP',                   'SD1-ALP-Serum',  209, NULL),
+                    ('TP',   '2885-2',  'g/L',    'Total Protein',                      'Total Protein',         'SD1-TP-Serum',   210, NULL),
+                    ('CK',   '2157-6',  'U/L',    'Creatine Kinase',                    'CK',                    'SD1-CK-Serum',   211, NULL),
+                    ('GGT',  '2324-2',  'U/L',    'Gamma-Glutamyl Transferase',         'GGT',                   'SD1-GGT-Serum',  212, NULL),
+                    ('HDL',  '2085-9',  'mg/dL',  'HDL Cholesterol',                    'HDL Cholesterol',       'SD1-HDL-Serum',  213, 'HDL cholesterol-Serum'),
+                    ('BUN',  '3094-0',  'mg/dL',  'Blood Urea Nitrogen',                'BUN',                   'SD1-BUN-Serum',  214, NULL),
+                    ('UA',   '3084-1',  'mg/dL',  'Uric Acid',                          'Uric Acid',             'SD1-UA-Serum',   215, NULL),
+                    ('TBA',  '14628-2', 'umol/L', 'Total Bile Acids',                   'Total Bile Acids',      'SD1-TBA-Serum',  216, NULL),
+                    ('AST',  '1920-8',  'U/L',    'Aspartate Aminotransferase',         'AST',                   'SD1-AST-Serum',  217, 'GOT/ASAT-Serum'),
+                    ('ALT',  '1742-6',  'U/L',    'Alanine Aminotransferase',           'ALT',                   'SD1-ALT-Serum',  218, 'GPT/ALAT-Serum'),
+                    ('Crea', '2160-0',  'mg/dL',  'Creatinine',                         'Creatinine',            'SD1-Crea-Serum', 219, 'Creatinine-Serum')
+            )
+            INSERT INTO clinlims.test
+                (id, name, description, reporting_description, loinc, is_active, orderable,
+                 test_section_id, uom_id, local_code, sort_order, guid, lastupdated)
+            SELECT nextval('clinlims.test_seq'), v.test_name, v.test_name || '(Serum)',
+                   v.report_name, v.loinc, 'Y', true,
+                   (SELECT ts.id FROM clinlims.test_section ts
+                     WHERE ts.name = 'Biochemistry'
+                        OR ts.description = 'Chem logbook'
+                     ORDER BY CASE WHEN ts.name = 'Biochemistry' THEN 0 ELSE 1 END, ts.id
+                     LIMIT 1),
+                   (SELECT min(u.id) FROM clinlims.unit_of_measure u
+                     WHERE lower(u.name) = lower(v.unit_name)
+                        OR lower(u.description) = lower(v.unit_name)
+                        OR u.code = v.unit_name),
+                   v.local_code, v.sort_order, gen_random_uuid()::varchar, now()
+              FROM sd1_tests v
+             WHERE NOT EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
+
+            WITH sd1_tests(code, loinc, unit_name, test_name, report_name, local_code, sort_order, legacy_local_code) AS (
+                VALUES
+                    ('LDL',  '22748-8', 'mmol/L', 'LDL Cholesterol',                    'LDL Cholesterol',       'SD1-LDL-Serum',  200, NULL),
+                    ('AMY',  '1798-8',  'U/L',    'Amylase',                            'Amylase',               'SD1-AMY-Serum',  201, 'Amylase-Serum'),
+                    ('GLU',  '2345-7',  'mg/dL',  'Glucose',                            'Glucose',               'SD1-GLU-Serum',  202, 'Glucose-Plasma'),
+                    ('TB',   '14631-6', 'umol/L', 'Total Bilirubin',                    'Total Bilirubin',       'SD1-TB-Serum',   203, NULL),
+                    ('TC',   '2093-3',  'mg/dL',  'Total Cholesterol',                  'Total Cholesterol',     'SD1-TC-Serum',   204, 'Total cholesterol-Serum'),
+                    ('TG',   '2571-8',  'mg/dL',  'Triglycerides',                      'Triglycerides',         'SD1-TG-Serum',   205, 'Triglicerides-Serum'),
+                    ('DB',   '14629-0', 'umol/L', 'Direct Bilirubin',                   'Direct Bilirubin',      'SD1-DB-Serum',   206, NULL),
+                    ('CHE',  '2098-2',  'U/L',    'Cholinesterase',                     'Cholinesterase',        'SD1-CHE-Serum',  207, NULL),
+                    ('ALB',  '1751-7',  'g/L',    'Albumin',                            'Albumin',               'SD1-ALB-Serum',  208, NULL),
+                    ('ALP',  '6768-6',  'U/L',    'Alkaline Phosphatase',               'ALP',                   'SD1-ALP-Serum',  209, NULL),
+                    ('TP',   '2885-2',  'g/L',    'Total Protein',                      'Total Protein',         'SD1-TP-Serum',   210, NULL),
+                    ('CK',   '2157-6',  'U/L',    'Creatine Kinase',                    'CK',                    'SD1-CK-Serum',   211, NULL),
+                    ('GGT',  '2324-2',  'U/L',    'Gamma-Glutamyl Transferase',         'GGT',                   'SD1-GGT-Serum',  212, NULL),
+                    ('HDL',  '2085-9',  'mg/dL',  'HDL Cholesterol',                    'HDL Cholesterol',       'SD1-HDL-Serum',  213, 'HDL cholesterol-Serum'),
+                    ('BUN',  '3094-0',  'mg/dL',  'Blood Urea Nitrogen',                'BUN',                   'SD1-BUN-Serum',  214, NULL),
+                    ('UA',   '3084-1',  'mg/dL',  'Uric Acid',                          'Uric Acid',             'SD1-UA-Serum',   215, NULL),
+                    ('TBA',  '14628-2', 'umol/L', 'Total Bile Acids',                   'Total Bile Acids',      'SD1-TBA-Serum',  216, NULL),
+                    ('AST',  '1920-8',  'U/L',    'Aspartate Aminotransferase',         'AST',                   'SD1-AST-Serum',  217, 'GOT/ASAT-Serum'),
+                    ('ALT',  '1742-6',  'U/L',    'Alanine Aminotransferase',           'ALT',                   'SD1-ALT-Serum',  218, 'GPT/ALAT-Serum'),
+                    ('Crea', '2160-0',  'mg/dL',  'Creatinine',                         'Creatinine',            'SD1-Crea-Serum', 219, 'Creatinine-Serum')
+            )
+            INSERT INTO clinlims.sampletype_test (id, sample_type_id, test_id, is_panel, display_order)
+            SELECT nextval('clinlims.sample_type_test_seq'),
+                   (SELECT min(s.id) FROM clinlims.type_of_sample s
+                     WHERE lower(s.description) = 'serum'
+                        OR lower(s.local_abbrev) = 'serum'),
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   false,
+                   v.sort_order
+              FROM sd1_tests v
+             WHERE EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+               AND EXISTS (
+                    SELECT 1 FROM clinlims.type_of_sample s
+                     WHERE lower(s.description) = 'serum'
+                        OR lower(s.local_abbrev) = 'serum')
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.sampletype_test st
+                     WHERE st.sample_type_id = (
+                            SELECT min(s.id) FROM clinlims.type_of_sample s
+                             WHERE lower(s.description) = 'serum'
+                                OR lower(s.local_abbrev) = 'serum')
+                       AND st.test_id = (
+                            SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc));
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.sampletype_test
+                 WHERE test_id IN (
+                    SELECT id FROM clinlims.test WHERE local_code LIKE 'SD1-%-Serum');
+
+                DELETE FROM clinlims.test
+                 WHERE local_code LIKE 'SD1-%-Serum'
+                   AND loinc IN (
+                        '22748-8', '1798-8', '2345-7', '14631-6', '2093-3',
+                        '2571-8', '14629-0', '2098-2', '1751-7', '6768-6',
+                        '2885-2', '2157-6', '2324-2', '2085-9', '3094-0',
+                        '3084-1', '14628-2', '1920-8', '1742-6', '2160-0');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis92-004-map-sd1-live-chemistry-codes" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.analyzer
+                         WHERE name = 'SMT-SD1'
+                            OR identifier_pattern = '^SMT-SD1$') THEN 1 ELSE 0 END
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the live SD1 OBX-3.1 chemistry codes, including mixed-case Crea, to LOINC-bearing Tests (LIS-92).</comment>
+        <sql>
+            WITH target_analyzers AS (
+                SELECT id FROM clinlims.analyzer
+                 WHERE name = 'SMT-SD1'
+                    OR identifier_pattern = '^SMT-SD1$'
+            )
+            DELETE FROM clinlims.analyzer_test_map m
+             USING target_analyzers a
+             WHERE m.analyzer_id = a.id
+               AND m.analyzer_test_name = 'CREA';
+
+            WITH sd1_map(code, loinc) AS (
+                VALUES
+                    ('LDL',  '22748-8'),
+                    ('AMY',  '1798-8'),
+                    ('GLU',  '2345-7'),
+                    ('TB',   '14631-6'),
+                    ('TC',   '2093-3'),
+                    ('TG',   '2571-8'),
+                    ('DB',   '14629-0'),
+                    ('CHE',  '2098-2'),
+                    ('ALB',  '1751-7'),
+                    ('ALP',  '6768-6'),
+                    ('TP',   '2885-2'),
+                    ('CK',   '2157-6'),
+                    ('GGT',  '2324-2'),
+                    ('HDL',  '2085-9'),
+                    ('BUN',  '3094-0'),
+                    ('UA',   '3084-1'),
+                    ('TBA',  '14628-2'),
+                    ('AST',  '1920-8'),
+                    ('ALT',  '1742-6'),
+                    ('Crea', '2160-0')
+            ),
+            target_analyzers AS (
+                SELECT id FROM clinlims.analyzer
+                 WHERE name = 'SMT-SD1'
+                    OR identifier_pattern = '^SMT-SD1$'
+            )
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, v.code,
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   now()
+              FROM target_analyzers a
+              CROSS JOIN sd1_map v
+             WHERE EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_test_map m
+                     WHERE m.analyzer_id = a.id
+                       AND m.analyzer_test_name = v.code);
+
+            WITH sd1_map(code, loinc) AS (
+                VALUES
+                    ('LDL',  '22748-8'),
+                    ('AMY',  '1798-8'),
+                    ('GLU',  '2345-7'),
+                    ('TB',   '14631-6'),
+                    ('TC',   '2093-3'),
+                    ('TG',   '2571-8'),
+                    ('DB',   '14629-0'),
+                    ('CHE',  '2098-2'),
+                    ('ALB',  '1751-7'),
+                    ('ALP',  '6768-6'),
+                    ('TP',   '2885-2'),
+                    ('CK',   '2157-6'),
+                    ('GGT',  '2324-2'),
+                    ('HDL',  '2085-9'),
+                    ('BUN',  '3094-0'),
+                    ('UA',   '3084-1'),
+                    ('TBA',  '14628-2'),
+                    ('AST',  '1920-8'),
+                    ('ALT',  '1742-6'),
+                    ('Crea', '2160-0')
+            ),
+            target_analyzers AS (
+                SELECT id FROM clinlims.analyzer
+                 WHERE name = 'SMT-SD1'
+                    OR identifier_pattern = '^SMT-SD1$'
+            )
+            UPDATE clinlims.analyzer_test_map m
+               SET test_id = (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   last_updated = now()
+              FROM target_analyzers a
+              JOIN sd1_map v ON true
+             WHERE m.analyzer_id = a.id
+               AND m.analyzer_test_name = v.code
+               AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                 WHERE analyzer_test_name IN (
+                        'LDL', 'AMY', 'GLU', 'TB', 'TC', 'TG', 'DB', 'CHE',
+                        'ALB', 'ALP', 'TP', 'CK', 'GGT', 'HDL', 'BUN', 'UA',
+                        'TBA', 'AST', 'ALT', 'Crea')
+                   AND analyzer_id IN (
+                        SELECT id FROM clinlims.analyzer
+                         WHERE name = 'SMT-SD1'
+                            OR identifier_pattern = '^SMT-SD1$');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
