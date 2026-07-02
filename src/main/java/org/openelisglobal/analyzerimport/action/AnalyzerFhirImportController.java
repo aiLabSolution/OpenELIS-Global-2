@@ -20,6 +20,7 @@ import java.util.stream.Stream;
 import org.hibernate.ObjectNotFoundException;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Device;
+import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Resource;
 import org.hl7.fhir.r4.model.Specimen;
@@ -66,6 +67,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnalyzerFhirImportController extends org.openelisglobal.common.rest.BaseRestController {
 
     private static final String CLASS_NAME = "AnalyzerFhirImportController";
+    private static final String OPENELIS_FHIR_TAG_SYSTEM = "http://openelis-global.org/fhir/tags";
+    private static final String CALIBRATION_TAG = "CALIBRATION";
 
     @Autowired
     private AnalyzerResultsService analyzerResultsService;
@@ -106,6 +109,13 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
                 response.put("error", "analyzer.fhirImport.error.invalidBundleType");
                 response.put("errorKey", "analyzer.fhirImport.error.invalidBundleType");
                 response.put("errorArgs", Map.of("bundleType", String.valueOf(bundle.getType())));
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            if (containsCalibrationReport(bundle)) {
+                response.put("success", false);
+                response.put("error", "analyzer.fhirImport.error.calibrationRejected");
+                response.put("errorKey", "analyzer.fhirImport.error.calibrationRejected");
                 return ResponseEntity.badRequest().body(response);
             }
 
@@ -253,6 +263,23 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             }
         }
         return !value.isEmpty();
+    }
+
+    private boolean containsCalibrationReport(Bundle bundle) {
+        for (Bundle.BundleEntryComponent entry : bundle.getEntry()) {
+            Resource resource = entry.getResource();
+            if (resource instanceof DiagnosticReport report && report.hasMeta() && report.getMeta().hasTag()) {
+                boolean calibration = report.getMeta().getTag().stream()
+                        .anyMatch(t -> CALIBRATION_TAG.equals(t.getCode()) && (t.getSystem() == null
+                                || t.getSystem().isBlank() || OPENELIS_FHIR_TAG_SYSTEM.equals(t.getSystem())));
+                if (calibration) {
+                    LogEvent.logWarn(CLASS_NAME, "importFhirBundle",
+                            "Rejecting calibration DiagnosticReport from analyzer FHIR import");
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private Analyzer tryGetAnalyzerById(String analyzerId) {
