@@ -34,8 +34,8 @@ import org.springframework.beans.factory.annotation.Autowired;
  * <ol>
  * <li><b>The seeds executed.</b> All {@code lis86-*} and {@code lis92-*}
  * changesets are recorded {@code EXECUTED} in {@code databasechangelog}
- * (liquibase's own tracking table, which fixtures never reset) — proving 049 and
- * 050 are wired into the changelog and applied cleanly in a from-scratch
+ * (liquibase's own tracking table, which fixtures never reset) — proving 049
+ * and 050 are wired into the changelog and applied cleanly in a from-scratch
  * migration.</li>
  * <li><b>The production resolver works over the real DB.</b> With a fixture
  * analyzer + twenty live SD1 code mappings + twenty LOINC-carrying Test rows
