@@ -132,4 +132,7 @@
   <!-- LIS-86 / S2.10: Seamaty SD1 biochem code -> LOINC seed (analyzer + per-code AnalyzerTestMapping + Test.loinc) -->
   <include relativeToChangelogFile="true" file="049-sd1-loinc-seed.xml"/>
 
+  <!-- LIS-92 / SD1 bench: reconcile live SMT-SD1 identity and seed the full 20-code chemistry panel -->
+  <include relativeToChangelogFile="true" file="050-sd1-live-chemistry-seed.xml"/>
+
 </databaseChangeLog>
