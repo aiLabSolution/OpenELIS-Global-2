@@ -5,8 +5,10 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
+import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.patient.valueholder.Patient;
@@ -35,6 +37,14 @@ import org.springframework.stereotype.Service;
 @Service
 public class AnalyzerOrderMenuService {
 
+    // A machine-generated analyzer barcode: short alpha prefix followed by a
+    // long digit run (H99S synthetic seed: DEV01260000000000002). Only
+    // identifiers of this shape get embedded-accession canonicalization —
+    // human-entered accessions, QC labels ("QC-01") and typos ("1002") must
+    // stay exact-match-only, or a miss could silently resolve to another
+    // patient's sample. Widen only against real wire captures.
+    private static final Pattern BARCODE_SHAPE = Pattern.compile("[A-Za-z]{1,5}\\d{10,}");
+
     @Autowired
     private SampleService sampleService;
 
@@ -56,12 +66,10 @@ public class AnalyzerOrderMenuService {
             throw new IllegalArgumentException("accessionNumber required");
         }
 
-        Sample sample = null;
-        for (String candidate : sampleIdentifierCandidates(sampleIdentifier)) {
-            sample = sampleService.getSampleByAccessionNumber(candidate);
-            if (sample != null) {
-                break;
-            }
+        String trimmed = sampleIdentifier.trim();
+        Sample sample = sampleService.getSampleByAccessionNumber(trimmed);
+        if (sample == null) {
+            sample = resolveBarcodeAlias(trimmed);
         }
         if (sample == null) {
             return null;
@@ -91,22 +99,43 @@ public class AnalyzerOrderMenuService {
         return patient != null ? patient.getId() : sample.getId();
     }
 
-    static List<String> sampleIdentifierCandidates(String sampleIdentifier) {
-        String trimmed = sampleIdentifier.trim();
-        LinkedHashSet<String> candidates = new LinkedHashSet<>();
-        candidates.add(trimmed);
-
-        String digits = trimmed.replaceAll("\\D", "");
-        if (!digits.isBlank()) {
-            String wholeDigits = stripLeadingZeros(digits);
-            if (!wholeDigits.isBlank()) {
-                candidates.add(wholeDigits);
+    /**
+     * Resolve a barcode-shaped identifier to its sample via embedded-accession
+     * candidates. The exact accession lookup has already been tried and missed.
+     * Candidates that resolve to more than one distinct sample are refused
+     * outright: an ORF answered with the wrong sample's pending orders makes the
+     * analyzer adopt that accession and post results under another patient, so
+     * ambiguity fails closed — the analyzer simply gets no worklist and the
+     * operator investigates.
+     */
+    private Sample resolveBarcodeAlias(String identifier) {
+        Sample resolved = null;
+        for (String candidate : barcodeAccessionCandidates(identifier)) {
+            Sample match = sampleService.getSampleByAccessionNumber(candidate);
+            if (match == null) {
+                continue;
             }
-            for (int i = 0; i < digits.length(); i++) {
-                String suffix = stripLeadingZeros(digits.substring(i));
-                if (!suffix.isBlank()) {
-                    candidates.add(suffix);
-                }
+            if (resolved != null && !resolved.getId().equals(match.getId())) {
+                LogEvent.logWarn(this.getClass().getSimpleName(), "resolveBarcodeAlias",
+                        "barcode identifier " + identifier + " matches accessions " + resolved.getAccessionNumber()
+                                + " and " + match.getAccessionNumber() + "; refusing ambiguous host-query lookup");
+                return null;
+            }
+            resolved = match;
+        }
+        return resolved;
+    }
+
+    static List<String> barcodeAccessionCandidates(String identifier) {
+        if (!BARCODE_SHAPE.matcher(identifier).matches()) {
+            return List.of();
+        }
+        String digits = identifier.replaceAll("\\D", "");
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        for (int i = 0; i < digits.length(); i++) {
+            String suffix = stripLeadingZeros(digits.substring(i));
+            if (!suffix.isBlank()) {
+                candidates.add(suffix);
             }
         }
         return new ArrayList<>(candidates);

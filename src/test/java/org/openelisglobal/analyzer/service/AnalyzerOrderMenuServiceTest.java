@@ -156,4 +156,49 @@ public class AnalyzerOrderMenuServiceTest {
         assertEquals("17", menu.patientId);
         assertEquals(List.of("6690-2", "718-7"), menu.loincCodes);
     }
+
+    // Canonicalization is gated on barcode shape: identifiers that are not a
+    // machine-generated barcode must never fall back to embedded-digit
+    // candidates, or a QC label / typo would resolve to another patient's
+    // live sample and the analyzer would post results under that accession.
+
+    @Test
+    public void qcLabelDoesNotCanonicalizeToAnAccession() {
+        seedAccession("1", "S1", analysisWithLoinc("6690-2"));
+
+        assertNull(service.getOrderMenu("QC-01"));
+    }
+
+    @Test
+    public void numericTypoDoesNotCanonicalizeToAnAccession() {
+        seedAccession("2", "S2", analysisWithLoinc("6690-2"));
+
+        assertNull(service.getOrderMenu("1002"));
+    }
+
+    @Test
+    public void shortAlphanumericIdDoesNotCanonicalizeToAnAccession() {
+        seedAccession("123", "S123", analysisWithLoinc("6690-2"));
+
+        assertNull(service.getOrderMenu("XYZ123"));
+    }
+
+    @Test
+    public void ambiguousBarcodeIsRefusedNotFirstMatchWins() {
+        seedAccession("102", "S102", analysisWithLoinc("6690-2"));
+        seedAccession("2", "S2", analysisWithLoinc("718-7"));
+
+        // digit suffixes of DEV00000000000000102 hit both 102 and 2
+        assertNull(service.getOrderMenu("DEV00000000000000102"));
+    }
+
+    @Test
+    public void barcodeCandidatesRequireBarcodeShape() {
+        assertEquals(List.of(), AnalyzerOrderMenuService.barcodeAccessionCandidates("QC-01"));
+        assertEquals(List.of(), AnalyzerOrderMenuService.barcodeAccessionCandidates("1002"));
+        assertEquals(List.of(), AnalyzerOrderMenuService.barcodeAccessionCandidates("XYZ123"));
+        assertEquals(List.of(), AnalyzerOrderMenuService.barcodeAccessionCandidates("ACC-102"));
+        assertEquals(List.of("1260000000000002", "260000000000002", "60000000000002", "2"),
+                AnalyzerOrderMenuService.barcodeAccessionCandidates("DEV01260000000000002"));
+    }
 }
