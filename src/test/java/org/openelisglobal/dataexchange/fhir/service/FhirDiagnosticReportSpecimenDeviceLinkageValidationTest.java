@@ -44,6 +44,7 @@ import org.openelisglobal.sample.valueholder.Sample;
 import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.openelisglobal.sampleitem.valueholder.SampleItem;
 import org.openelisglobal.test.service.TestService;
+import org.openelisglobal.testterminology.service.TestTerminologyMappingService;
 import org.openelisglobal.typeofsample.valueholder.TypeOfSample;
 
 /**
@@ -120,6 +121,9 @@ public class FhirDiagnosticReportSpecimenDeviceLinkageValidationTest {
 
     @Mock
     private FhirFacilityOrganizationService facilityOrganizationService;
+
+    @Mock
+    private TestTerminologyMappingService testTerminologyMappingService;
 
     @InjectMocks
     private FhirTransformServiceImpl fhirTransformService;

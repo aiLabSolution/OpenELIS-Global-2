@@ -40,6 +40,7 @@ import org.openelisglobal.sample.valueholder.Sample;
 import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.openelisglobal.sampleitem.valueholder.SampleItem;
 import org.openelisglobal.test.service.TestService;
+import org.openelisglobal.testterminology.service.TestTerminologyMappingService;
 
 /**
  * S4.1 (LIS-41) FHIR conformance gate: a <b>finalized</b> result must transform
@@ -96,6 +97,9 @@ public class FhirResultDiagnosticReportValidationTest {
 
     @Mock
     private FhirFacilityOrganizationService facilityOrganizationService;
+
+    @Mock
+    private TestTerminologyMappingService testTerminologyMappingService;
 
     @InjectMocks
     private FhirTransformServiceImpl fhirTransformService;
