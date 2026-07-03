@@ -19,6 +19,7 @@ import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
+import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.sample.service.SampleService;
 import org.openelisglobal.sample.valueholder.Sample;
 
@@ -67,12 +68,14 @@ public class AnalyzerOrderMenuServiceTest {
         return a;
     }
 
-    private void seedAccession(String accession, String sampleId, Analysis... pendingAnalyses) {
+    private Sample seedAccession(String accession, String sampleId, Analysis... pendingAnalyses) {
         Sample s = Mockito.mock(Sample.class);
         when(s.getId()).thenReturn(sampleId);
+        when(s.getAccessionNumber()).thenReturn(accession);
         when(sampleService.getSampleByAccessionNumber(accession)).thenReturn(s);
         when(analysisService.getAnalysesBySampleIdExcludedByStatusId(eq(sampleId), Mockito.anySet()))
                 .thenReturn(List.of(pendingAnalyses));
+        return s;
     }
 
     @Test
@@ -138,5 +141,19 @@ public class AnalyzerOrderMenuServiceTest {
 
         assertEquals("ACC-1", menu.accessionNumber);
         assertEquals(List.of("6690-2"), menu.loincCodes);
+    }
+
+    @Test
+    public void h99sBarcodeAliasResolvesToAccessionAndLinkedPatient() {
+        Sample sample = seedAccession("2", "S99", analysisWithLoinc("6690-2"), analysisWithLoinc("718-7"));
+        Patient patient = new Patient();
+        patient.setId("17");
+        when(sampleService.getPatient(sample)).thenReturn(patient);
+
+        AnalyzerOrderMenuService.OrderMenu menu = service.getOrderMenu("DEV01260000000000002");
+
+        assertEquals("2", menu.accessionNumber);
+        assertEquals("17", menu.patientId);
+        assertEquals(List.of("6690-2", "718-7"), menu.loincCodes);
     }
 }

@@ -2,12 +2,14 @@ package org.openelisglobal.analyzer.service;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
+import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.sample.service.SampleService;
 import org.openelisglobal.sample.valueholder.Sample;
 import org.openelisglobal.spring.util.SpringContext;
@@ -16,12 +18,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Resolves the pending order menu for one accession — the ordered-but-
- * unresulted tests as LOINC. This answers analyzer host queries (ASTM Q-record
- * via the bridge): the analyzer scans a barcoded tube, the bridge asks OE what
- * work is pending for that accession, and translates the returned LOINCs to the
- * analyzer's own codes. OE stays analyzer-agnostic and speaks LOINC only, the
- * same interlingua as the {@link AnalyzerOrderDispatchService} push path.
+ * Resolves the pending order menu for one accession or analyzer barcode — the
+ * ordered-but-unresulted tests as LOINC. This answers analyzer host queries
+ * (ASTM Q-record or HL7 QRY^R02 via the bridge): the analyzer scans a barcoded
+ * tube, the bridge asks OE what work is pending for that identifier, and
+ * translates the returned LOINCs to the analyzer's own codes. OE stays
+ * analyzer-agnostic and speaks LOINC only, the same interlingua as the
+ * {@link AnalyzerOrderDispatchService} push path.
  *
  * <p>
  * "Unresulted" is defined by exclusion: Canceled, SampleRejected, Finalized,
@@ -45,15 +48,21 @@ public class AnalyzerOrderMenuService {
     private IStatusService statusService;
 
     /**
-     * Resolve the pending order menu for an accession, or null when no sample
-     * exists for it.
+     * Resolve the pending order menu for an accession or analyzer barcode, or null
+     * when no sample exists for it.
      */
-    public OrderMenu getOrderMenu(String accessionNumber) {
-        if (accessionNumber == null || accessionNumber.isBlank()) {
+    public OrderMenu getOrderMenu(String sampleIdentifier) {
+        if (sampleIdentifier == null || sampleIdentifier.isBlank()) {
             throw new IllegalArgumentException("accessionNumber required");
         }
 
-        Sample sample = sampleService.getSampleByAccessionNumber(accessionNumber.trim());
+        Sample sample = null;
+        for (String candidate : sampleIdentifierCandidates(sampleIdentifier)) {
+            sample = sampleService.getSampleByAccessionNumber(candidate);
+            if (sample != null) {
+                break;
+            }
+        }
         if (sample == null) {
             return null;
         }
@@ -71,10 +80,41 @@ public class AnalyzerOrderMenuService {
         }
 
         OrderMenu menu = new OrderMenu();
-        menu.accessionNumber = accessionNumber.trim();
-        menu.patientId = sample.getId();
+        menu.accessionNumber = sample.getAccessionNumber();
+        menu.patientId = resolvePatientId(sample);
         menu.loincCodes = loincCodes;
         return menu;
+    }
+
+    private String resolvePatientId(Sample sample) {
+        Patient patient = sampleService.getPatient(sample);
+        return patient != null ? patient.getId() : sample.getId();
+    }
+
+    static List<String> sampleIdentifierCandidates(String sampleIdentifier) {
+        String trimmed = sampleIdentifier.trim();
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        candidates.add(trimmed);
+
+        String digits = trimmed.replaceAll("\\D", "");
+        if (!digits.isBlank()) {
+            String wholeDigits = stripLeadingZeros(digits);
+            if (!wholeDigits.isBlank()) {
+                candidates.add(wholeDigits);
+            }
+            for (int i = 0; i < digits.length(); i++) {
+                String suffix = stripLeadingZeros(digits.substring(i));
+                if (!suffix.isBlank()) {
+                    candidates.add(suffix);
+                }
+            }
+        }
+        return new ArrayList<>(candidates);
+    }
+
+    private static String stripLeadingZeros(String value) {
+        String stripped = value.replaceFirst("^0+", "");
+        return stripped.isBlank() ? "0" : stripped;
     }
 
     private Set<String> resultedOrDeadStatusIds() {
