@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -94,6 +95,43 @@ public class AnalyzerBridgeStartupRegistrarTest {
         verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS)).registerFile(eq("2009"), eq("QuantStudio 7 Flex"),
                 eq("/data/analyzer-imports/quantstudio"), eq("*.xlsx"),
                 eq(Map.of("Sample Name", "sampleId", "CT", "result")), eq("EXCEL"), any(), any(), any());
+    }
+
+    /**
+     * LIS-98 register-then-sync ordering: the full-state sync that follows the
+     * per-analyzer register loop is a REPLACE on the bridge, so every sync payload
+     * (TCP and FILE) must attach the translation maps the register call just pushed
+     * — otherwise each OE restart silently wipes the bridge's code→LOINC map.
+     */
+    @Test
+    public void syncPayloadsAfterRegisterCarryTranslationMaps() {
+        analyzer.setIpAddress("10.0.0.5");
+        analyzer.setIdentifierPattern("H60.*");
+        analyzer.setImportDirectory("/data/analyzer-imports/sd1");
+        analyzer.setFilePattern("*.csv");
+
+        when(analyzerService.getAllWithTypes()).thenReturn(List.of(analyzer));
+        when(bridgeRegistrationService.registerTcp(any(), any(), any(), any(), any(), any())).thenReturn(true);
+        when(bridgeRegistrationService.registerFile(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(true);
+
+        registrar.onStartup(rootContextRefreshedEvent());
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<Map<String, Object>>> captor = org.mockito.ArgumentCaptor
+                .forClass((Class) List.class);
+        verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS)).syncAll(captor.capture());
+        List<Map<String, Object>> payloads = captor.getValue();
+        org.junit.Assert.assertEquals(2, payloads.size());
+        // The TCP payload must carry identifierPattern — /register sends it,
+        // so a sync REPLACE without it resets the bridge's identity check.
+        org.junit.Assert.assertEquals("H60.*", payloads.get(0).get("identifierPattern"));
+        // One TCP payload + one FILE payload, each carrying all four
+        // REPLACE-sensitive attachments.
+        verify(bridgeRegistrationService, times(2)).attachQcRules(any(), eq("2009"));
+        verify(bridgeRegistrationService, times(2)).attachControlLots(any(), eq("2009"));
+        verify(bridgeRegistrationService, times(2)).attachTestCodeLoinc(any(), eq("2009"));
+        verify(bridgeRegistrationService, times(2)).attachTestUnitUcum(any());
     }
 
     @Test

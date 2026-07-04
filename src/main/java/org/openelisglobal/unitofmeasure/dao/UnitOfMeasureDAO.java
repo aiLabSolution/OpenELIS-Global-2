@@ -47,4 +47,13 @@ public interface UnitOfMeasureDAO extends BaseDAO<UnitOfMeasure, String> {
 
     boolean duplicateUnitOfMeasureExists(UnitOfMeasure unitOfMeasure) throws LIMSRuntimeException;
 
+    /**
+     * Raw unit text → UCUM code for all active units that have a UCUM code
+     * (unit_of_measure.name/code → ucum_code). Keys include both the unit's name
+     * and its short code so either spelling of the raw analyzer unit resolves. The
+     * ucum_code/code/is_active columns are DB-only (liquibase OGC-938) — not mapped
+     * on the entity — hence the native query.
+     */
+    java.util.Map<String, String> getActiveUnitUcumMap() throws LIMSRuntimeException;
+
 }

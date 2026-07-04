@@ -118,6 +118,30 @@ public class AnalyzerRestControllerTest extends BaseWebContextSensitiveTest {
     }
 
     /**
+     * Test: GET /rest/analyzer/analyzers includes the testCodeLoinc + testUnitUcum
+     * translation maps per analyzer (LIS-98). The bridge's startup pull REPLACEs
+     * its registry from this response, so both maps must always be present
+     * (possibly empty) — a response without them strips the bridge's code→LOINC
+     * translation on every bridge restart.
+     */
+    @Test
+    public void testGetAnalyzers_IncludesTranslationMapFields() throws Exception {
+        String uniqueName = "TEST-Loinc-" + System.currentTimeMillis();
+        String createBody = "{\"name\":\"" + uniqueName + "\",\"analyzerType\":\"Chemistry Analyzer\",\"ipAddress\":\""
+                + testIp + "\"," + "\"port\":5000,\"testUnitIds\":[]}";
+        mockMvc.perform(post("/rest/analyzer/analyzers").contentType(MediaType.APPLICATION_JSON).content(createBody))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/rest/analyzer/analyzers").contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.analyzers").isArray())
+                .andExpect(jsonPath("$.analyzers[0].testCodeLoinc").exists())
+                .andExpect(jsonPath("$.analyzers[0].testCodeLoinc").isMap())
+                .andExpect(jsonPath("$.analyzers[0].testUnitUcum").exists())
+                .andExpect(jsonPath("$.analyzers[0].testUnitUcum").isMap());
+    }
+
+    /**
      * Test: POST /rest/analyzer/analyzers creates analyzer with valid data
      */
     @Test

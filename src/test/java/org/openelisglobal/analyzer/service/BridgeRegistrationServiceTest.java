@@ -104,4 +104,45 @@ public class BridgeRegistrationServiceTest {
         assertTrue(payload.containsKey("testCodeLoinc"));
         assertNotNull(payload.get("testCodeLoinc"));
     }
+
+    @Test
+    public void attachTestUnitUcumBuildsFromUnitMasterList() throws Exception {
+        org.openelisglobal.unitofmeasure.service.UnitOfMeasureService uomService = mock(
+                org.openelisglobal.unitofmeasure.service.UnitOfMeasureService.class);
+        inject("unitOfMeasureService", uomService);
+        Map<String, String> unitMap = new LinkedHashMap<>();
+        unitMap.put("mmol/L", "mmol/L");
+        unitMap.put("x10^9/L", "10*9/L");
+        when(uomService.getActiveUnitUcumMap()).thenReturn(unitMap);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        svc.attachTestUnitUcum(payload);
+
+        assertEquals(unitMap, payload.get("testUnitUcum"));
+    }
+
+    @Test
+    public void attachTestUnitUcumAlwaysAttachesWithoutService() {
+        // unitOfMeasureService left null (older deployment) — the key must
+        // still be present so the bridge /sync contract stays stable.
+        Map<String, Object> payload = new LinkedHashMap<>();
+        svc.attachTestUnitUcum(payload);
+        assertTrue(payload.containsKey("testUnitUcum"));
+        assertNotNull(payload.get("testUnitUcum"));
+    }
+
+    @Test
+    public void attachTestUnitUcumDegradesOnDataAccessError() throws Exception {
+        org.openelisglobal.unitofmeasure.service.UnitOfMeasureService uomService = mock(
+                org.openelisglobal.unitofmeasure.service.UnitOfMeasureService.class);
+        inject("unitOfMeasureService", uomService);
+        when(uomService.getActiveUnitUcumMap()).thenThrow(new RuntimeException("db down"));
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        svc.attachTestUnitUcum(payload);
+
+        // Registration must not fail because the unit map couldn't be built.
+        assertTrue(payload.containsKey("testUnitUcum"));
+        assertEquals(new LinkedHashMap<String, String>(), payload.get("testUnitUcum"));
+    }
 }
