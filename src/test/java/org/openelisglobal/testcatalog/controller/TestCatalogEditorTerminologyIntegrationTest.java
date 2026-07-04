@@ -198,6 +198,17 @@ public class TestCatalogEditorTerminologyIntegrationTest extends BaseWebContextS
     }
 
     @org.junit.Test
+    public void saveTerminology_doesNotClearLegacyLoincWhenNoLoincMappingRowsExist() {
+        jdbc.update("UPDATE clinlims.test SET loinc = ? WHERE id = ?", "22748-8", TEST_ID);
+
+        put();
+        assertEquals("22748-8", legacyLoinc());
+
+        put(mapping("SNOMED", "271649006", "SAME_AS"));
+        assertEquals("22748-8", legacyLoinc());
+    }
+
+    @org.junit.Test
     public void syncLegacyLoinc_mirrorsLegacyLoincIntoMappings_andLeavesOtherSourcesAlone() {
         // Seed a non-LOINC mapping that legacy LOINC edits must not disturb.
         put(mapping("SNOMED", "271649006", "SAME_AS"));

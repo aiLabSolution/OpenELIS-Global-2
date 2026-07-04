@@ -1169,24 +1169,34 @@ public class FhirTransformServiceImpl implements FhirTransformService {
                     .add(new Candidate(test.getLoinc(), true));
         }
 
-        // Emit one system's codings at a time. Within a system the SAME_AS mapping is
-        // the equivalent concept, so it wins; with no SAME_AS we keep the rest. A test
-        // thus maps to multiple terminology systems at once (LOINC + SNOMED + ...).
+        // Emit one system's codings at a time, pinning LOINC first so consumers and
+        // tests that read coding[0] remain deterministic even when mappings arrive
+        // from an unordered query.
+        addCodings(codeableConcept, "http://loinc.org", bySystem.remove("http://loinc.org"), display);
         for (Map.Entry<String, List<Candidate>> entry : bySystem.entrySet()) {
-            String system = entry.getKey();
-            List<Candidate> candidates = entry.getValue();
-            boolean hasSameAs = candidates.stream().anyMatch(c -> c.sameAs);
-            Set<String> seenCodes = new HashSet<>();
-            for (Candidate candidate : candidates) {
-                if (hasSameAs && !candidate.sameAs) {
-                    continue;
-                }
-                if (seenCodes.add(candidate.code)) {
-                    codeableConcept.addCoding(new Coding(system, candidate.code, display));
-                }
-            }
+            addCodings(codeableConcept, entry.getKey(), entry.getValue(), display);
+        }
+        if (!codeableConcept.hasCoding() && !GenericValidator.isBlankOrNull(display)) {
+            codeableConcept.setText(display);
         }
         return codeableConcept;
+    }
+
+    private void addCodings(CodeableConcept codeableConcept, String system, List<Candidate> candidates,
+            String display) {
+        if (candidates == null || candidates.isEmpty()) {
+            return;
+        }
+        boolean hasSameAs = candidates.stream().anyMatch(c -> c.sameAs);
+        Set<String> seenCodes = new HashSet<>();
+        for (Candidate candidate : candidates) {
+            if (hasSameAs && !candidate.sameAs) {
+                continue;
+            }
+            if (seenCodes.add(candidate.code)) {
+                codeableConcept.addCoding(new Coding(system, candidate.code, display));
+            }
+        }
     }
 
     /**
@@ -2569,7 +2579,9 @@ public class FhirTransformServiceImpl implements FhirTransformService {
         Test requestedTest = null;
         if (serviceRequest.hasCode()) {
             List<Test> foundTests = resolveTestsFromServiceRequest(serviceRequest);
-            requestedTest = foundTests.get(0);
+            if (!foundTests.isEmpty()) {
+                requestedTest = foundTests.get(0);
+            }
         }
 
         // Build edit item for existing analysis if available
@@ -2815,11 +2827,12 @@ public class FhirTransformServiceImpl implements FhirTransformService {
     public List<Test> resolveTestsFromServiceRequest(ServiceRequest serviceRequest) {
         List<Test> resolvedTests = new ArrayList<>();
 
-        if (serviceRequest == null || !serviceRequest.hasCode() || !serviceRequest.getCode().hasCoding()) {
+        if (serviceRequest == null || !serviceRequest.hasCode()) {
             return resolvedTests;
         }
 
-        serviceRequest.getCode().getCoding().forEach(coding -> {
+        CodeableConcept code = serviceRequest.getCode();
+        code.getCoding().forEach(coding -> {
 
             if ("http://loinc.org".equalsIgnoreCase(coding.getSystem()) && coding.hasCode()) {
 
@@ -2838,6 +2851,12 @@ public class FhirTransformServiceImpl implements FhirTransformService {
                 }
             }
         });
+        if (code.hasText() && !GenericValidator.isBlankOrNull(code.getText())) {
+            List<Test> nameTests = testService.getTestsByName(code.getText());
+            if (nameTests != null && !nameTests.isEmpty()) {
+                resolvedTests.addAll(nameTests.stream().filter(t -> "Y".equals(t.getIsActive())).toList());
+            }
+        }
 
         return resolvedTests.stream().collect(Collectors.collectingAndThen(
                 Collectors.toMap(Test::getId, t -> t, (a, b) -> a), m -> new ArrayList<>(m.values())));
