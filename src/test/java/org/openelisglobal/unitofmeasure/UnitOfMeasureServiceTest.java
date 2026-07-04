@@ -5,6 +5,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.List;
+import java.util.Map;
+import javax.sql.DataSource;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
@@ -12,11 +14,15 @@ import org.openelisglobal.common.exception.LIMSDuplicateRecordException;
 import org.openelisglobal.unitofmeasure.service.UnitOfMeasureService;
 import org.openelisglobal.unitofmeasure.valueholder.UnitOfMeasure;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 public class UnitOfMeasureServiceTest extends BaseWebContextSensitiveTest {
 
     @Autowired
     private UnitOfMeasureService unitOfMeasureService;
+
+    @Autowired
+    private DataSource dataSource;
 
     @Before
     public void setUp() throws Exception {
@@ -122,5 +128,35 @@ public class UnitOfMeasureServiceTest extends BaseWebContextSensitiveTest {
 
         assertTrue("Should find mg/dL unit", foundMgdL);
         assertTrue("Should find % unit", foundPercent);
+    }
+
+    /**
+     * LIS-98: the unit→UCUM map pushed to the analyzer bridge is built from active
+     * unit_of_measure rows carrying a ucum_code, keyed by both name and short code.
+     * ucum_code/code/is_active are DB-only columns (liquibase OGC-938), so the
+     * query is native — exercise it against the real schema.
+     */
+    @Test
+    public void getActiveUnitUcumMap_keysByNameAndCode_excludesInactive() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        try {
+            jdbc.update("INSERT INTO clinlims.unit_of_measure"
+                    + " (id, name, description, lastupdated, code, ucum_code, is_active)"
+                    + " VALUES (nextval('clinlims.unit_of_measure_seq'), 'x10^9/L', 'lis98-ucum-active', now(),"
+                    + " 'LIS98E9', '10*9/L', 'Y')");
+            jdbc.update("INSERT INTO clinlims.unit_of_measure"
+                    + " (id, name, description, lastupdated, code, ucum_code, is_active)"
+                    + " VALUES (nextval('clinlims.unit_of_measure_seq'), 'x10^12/L', 'lis98-ucum-inactive', now(),"
+                    + " 'LIS98E12', '10*12/L', 'N')");
+
+            Map<String, String> unitToUcum = unitOfMeasureService.getActiveUnitUcumMap();
+
+            assertEquals("10*9/L", unitToUcum.get("x10^9/L"));
+            assertEquals("keyed by short code too", "10*9/L", unitToUcum.get("LIS98E9"));
+            assertTrue("inactive unit must be excluded", !unitToUcum.containsKey("x10^12/L"));
+            assertTrue("inactive unit's code must be excluded", !unitToUcum.containsKey("LIS98E12"));
+        } finally {
+            jdbc.update("DELETE FROM clinlims.unit_of_measure WHERE description LIKE 'lis98-ucum-%'");
+        }
     }
 }

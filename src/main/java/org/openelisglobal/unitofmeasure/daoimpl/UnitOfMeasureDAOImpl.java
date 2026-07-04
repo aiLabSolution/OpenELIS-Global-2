@@ -80,4 +80,33 @@ public class UnitOfMeasureDAOImpl extends BaseDAOImpl<UnitOfMeasure, String> imp
             throw new LIMSRuntimeException("Error in duplicateUnitOfMeasureExists()", e);
         }
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Map<String, String> getActiveUnitUcumMap() throws LIMSRuntimeException {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Object[]> rows = entityManager
+                    .createNativeQuery("SELECT name, code, ucum_code FROM clinlims.unit_of_measure"
+                            + " WHERE is_active = 'Y' AND ucum_code IS NOT NULL AND ucum_code <> ''" + " ORDER BY id")
+                    .getResultList();
+            // First row wins on duplicate unit text (ORDER BY id keeps it stable).
+            java.util.Map<String, String> unitToUcum = new java.util.LinkedHashMap<>();
+            for (Object[] row : rows) {
+                String name = (String) row[0];
+                String code = (String) row[1];
+                String ucum = (String) row[2];
+                if (name != null && !name.isBlank()) {
+                    unitToUcum.putIfAbsent(name.trim(), ucum);
+                }
+                if (code != null && !code.isBlank()) {
+                    unitToUcum.putIfAbsent(code.trim(), ucum);
+                }
+            }
+            return unitToUcum;
+        } catch (RuntimeException e) {
+            LogEvent.logError(e);
+            throw new LIMSRuntimeException("Error in getActiveUnitUcumMap()", e);
+        }
+    }
 }

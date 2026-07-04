@@ -44,6 +44,13 @@ public class BridgeRegistrationService {
     @Autowired(required = false)
     private org.openelisglobal.test.service.TestService testService;
 
+    // Raw unit text → UCUM, pushed with the same payloads as testCodeLoinc.
+    // Sourced from the lab's active unit master list
+    // (unit_of_measure.name/code → ucum_code) so the bridge can stamp FHIR
+    // Quantity.system/code while Quantity.unit keeps the raw analyzer text.
+    @Autowired(required = false)
+    private org.openelisglobal.unitofmeasure.service.UnitOfMeasureService unitOfMeasureService;
+
     /** Register a TCP analyzer (ASTM/HL7) with the bridge. */
     public boolean registerTcp(String oeAnalyzerId, String name, String ip, Integer port, String protocol,
             String identifierPattern) {
@@ -68,6 +75,7 @@ public class BridgeRegistrationService {
             attachQcRules(payload, oeAnalyzerId);
             attachControlLots(payload, oeAnalyzerId);
             attachTestCodeLoinc(payload, oeAnalyzerId);
+            attachTestUnitUcum(payload);
             String json = objectMapper.writeValueAsString(payload);
             return callRegister(json, oeAnalyzerId);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -112,6 +120,7 @@ public class BridgeRegistrationService {
             attachQcRules(payload, oeAnalyzerId);
             attachControlLots(payload, oeAnalyzerId);
             attachTestCodeLoinc(payload, oeAnalyzerId);
+            attachTestUnitUcum(payload);
             String json = objectMapper.writeValueAsString(payload);
             return callRegister(json, oeAnalyzerId);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -274,6 +283,16 @@ public class BridgeRegistrationService {
      * payload can clear stale bridge mappings.
      */
     void attachTestCodeLoinc(java.util.Map<String, Object> payload, String oeAnalyzerId) {
+        payload.put("testCodeLoinc", buildTestCodeLoinc(oeAnalyzerId));
+    }
+
+    /**
+     * Build the analyzer's {@code test_code → LOINC} map. Shared by the
+     * register/sync payload builders and the REST serializer feeding the bridge's
+     * startup pull ({@code GET /rest/analyzer/analyzers}) — all three
+     * bridge-registry write paths must carry the same maps (LIS-98).
+     */
+    public java.util.Map<String, String> buildTestCodeLoinc(String oeAnalyzerId) {
         java.util.Map<String, String> codeToLoinc = new java.util.LinkedHashMap<>();
         if (analyzerTestMappingService != null && testService != null) {
             for (org.openelisglobal.analyzerimport.valueholder.AnalyzerTestMapping m : analyzerTestMappingService
@@ -290,12 +309,36 @@ public class BridgeRegistrationService {
                         codeToLoinc.put(code, loinc);
                     }
                 } catch (Exception e) {
-                    LogEvent.logWarn(CLASS_NAME, "attachTestCodeLoinc",
+                    LogEvent.logWarn(CLASS_NAME, "buildTestCodeLoinc",
                             "Could not resolve LOINC for testId " + testId + ": " + e.getMessage());
                 }
             }
         }
-        payload.put("testCodeLoinc", codeToLoinc);
+        return codeToLoinc;
+    }
+
+    /**
+     * Attach the raw-unit → UCUM map so the bridge can stamp FHIR
+     * Quantity.system/code. Always attaches (possibly empty) — same
+     * clear-stale-state semantics as testCodeLoinc/qcRules/controlLots. The map is
+     * lab-global (unit vocabulary is not analyzer-specific) but the bridge contract
+     * scopes it per analyzer entry, so every payload carries it.
+     */
+    void attachTestUnitUcum(java.util.Map<String, Object> payload) {
+        payload.put("testUnitUcum", buildTestUnitUcum());
+    }
+
+    /** Build the raw-unit → UCUM map from the active unit master list. */
+    public java.util.Map<String, String> buildTestUnitUcum() {
+        if (unitOfMeasureService == null) {
+            return new java.util.LinkedHashMap<>();
+        }
+        try {
+            return unitOfMeasureService.getActiveUnitUcumMap();
+        } catch (Exception e) {
+            LogEvent.logWarn(CLASS_NAME, "buildTestUnitUcum", "Could not build unit→UCUM map: " + e.getMessage());
+            return new java.util.LinkedHashMap<>();
+        }
     }
 
     void attachQcRules(java.util.Map<String, Object> payload, String oeAnalyzerId) {

@@ -704,6 +704,14 @@ public class AnalyzerRestController extends BaseRestController {
                 .map(AnalyzerTestMapping::getAnalyzerTestName).distinct().collect(Collectors.toList());
         map.put("testMappings", testMappings);
 
+        // Translation maps for the bridge's startup pull (LIS-98). The pull
+        // REPLACEs the bridge registry the same way /sync does, so this
+        // response must carry the same maps as the register/sync payloads —
+        // otherwise a bridge restart strips code→LOINC translation until OE
+        // re-registers. Field names match the RegistrationRequest contract.
+        map.put("testCodeLoinc", bridgeRegistrationService.buildTestCodeLoinc(analyzer.getId()));
+        map.put("testUnitUcum", bridgeRegistrationService.buildTestUnitUcum());
+
         // Derive plugin type info from analyzer_type FK
         boolean isGeneric = analyzer.getAnalyzerType() != null && analyzer.getAnalyzerType().isGenericPlugin();
         map.put("genericPlugin", isGeneric);

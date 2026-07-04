@@ -1,9 +1,11 @@
 package org.openelisglobal.analyzer.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -94,6 +96,34 @@ public class AnalyzerBridgeStartupRegistrarTest {
         verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS)).registerFile(eq("2009"), eq("QuantStudio 7 Flex"),
                 eq("/data/analyzer-imports/quantstudio"), eq("*.xlsx"),
                 eq(Map.of("Sample Name", "sampleId", "CT", "result")), eq("EXCEL"), any(), any(), any());
+    }
+
+    /**
+     * LIS-98 register-then-sync ordering: the full-state sync that follows the
+     * per-analyzer register loop is a REPLACE on the bridge, so every sync payload
+     * (TCP and FILE) must attach the translation maps the register call just pushed
+     * — otherwise each OE restart silently wipes the bridge's code→LOINC map.
+     */
+    @Test
+    public void syncPayloadsAfterRegisterCarryTranslationMaps() {
+        analyzer.setIpAddress("10.0.0.5");
+        analyzer.setImportDirectory("/data/analyzer-imports/sd1");
+        analyzer.setFilePattern("*.csv");
+
+        when(analyzerService.getAllWithTypes()).thenReturn(List.of(analyzer));
+        when(bridgeRegistrationService.registerTcp(any(), any(), any(), any(), any(), any())).thenReturn(true);
+        when(bridgeRegistrationService.registerFile(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(true);
+
+        registrar.onStartup(rootContextRefreshedEvent());
+
+        verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS)).syncAll(argThat(payloads -> payloads.size() == 2));
+        // One TCP payload + one FILE payload, each carrying all four
+        // REPLACE-sensitive attachments.
+        verify(bridgeRegistrationService, times(2)).attachQcRules(any(), eq("2009"));
+        verify(bridgeRegistrationService, times(2)).attachControlLots(any(), eq("2009"));
+        verify(bridgeRegistrationService, times(2)).attachTestCodeLoinc(any(), eq("2009"));
+        verify(bridgeRegistrationService, times(2)).attachTestUnitUcum(any());
     }
 
     @Test

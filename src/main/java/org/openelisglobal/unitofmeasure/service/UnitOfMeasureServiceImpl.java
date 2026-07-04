@@ -152,4 +152,10 @@ public class UnitOfMeasureServiceImpl extends AuditableBaseObjectServiceImpl<Uni
         Hibernate.initialize(localization);
         return localization;
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, String> getActiveUnitUcumMap() {
+        return unitOfMeasureDAO.getActiveUnitUcumMap();
+    }
 }

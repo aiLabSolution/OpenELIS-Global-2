@@ -16,4 +16,11 @@ public interface UnitOfMeasureService extends BaseObjectService<UnitOfMeasure, S
     void refreshNames();
 
     Localization getLocalizationForUnitOfMeasure(String id);
+
+    /**
+     * Raw unit text → UCUM code for all active units carrying a UCUM code. Pushed
+     * to the analyzer bridge as {@code testUnitUcum} so FHIR results get
+     * Quantity.system/code while Quantity.unit keeps the raw analyzer text.
+     */
+    java.util.Map<String, String> getActiveUnitUcumMap();
 }
