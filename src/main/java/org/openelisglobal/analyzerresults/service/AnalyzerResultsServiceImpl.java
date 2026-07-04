@@ -103,12 +103,15 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
      * file output twice" scenario).</li>
      * <li><b>Anything else on an existing key</b> — insert the incoming row as a
      * linked correction ({@code readOnly=true}, {@code duplicateAnalyzerResultId}
-     * backlink on both rows). The staging UI then shows both rows linked so a tech
-     * can pick which to accept. This preserves an implicit audit trail without a
-     * separate history table. Skipping on date-or-value alone silently lost results
-     * (a re-run with an unchanged value, or a corrected value re-sent with the same
-     * completion timestamp) — and the key carries no patient dimension, so the lost
-     * row can belong to a different sample or patient (LIS-121).</li>
+     * backlink on both rows). The staging UI shows both rows linked and
+     * highlighted, so the discrepancy is visible to the tech before accepting.
+     * NOTE: the stock accept flow cannot yet accept the readOnly correction itself
+     * (it is excluded from sample groupings and removed when its group is handled)
+     * — the explicit pick-the-correction workflow is tracked as LIS-158/LIS-85.
+     * Skipping on date-or-value alone silently lost results (a re-run with an
+     * unchanged value, or a corrected value re-sent with the same completion
+     * timestamp) — and the key carries no patient dimension, so the lost row can
+     * belong to a different sample or patient (LIS-121).</li>
      * </ol>
      *
      * <p>
