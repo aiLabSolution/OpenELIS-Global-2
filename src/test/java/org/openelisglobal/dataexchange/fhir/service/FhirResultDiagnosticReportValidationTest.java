@@ -1,6 +1,7 @@
 package org.openelisglobal.dataexchange.fhir.service;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -41,6 +42,7 @@ import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.openelisglobal.sampleitem.valueholder.SampleItem;
 import org.openelisglobal.test.service.TestService;
 import org.openelisglobal.testterminology.service.TestTerminologyMappingService;
+import org.openelisglobal.testterminology.valueholder.TestTerminologyMapping;
 
 /**
  * S4.1 (LIS-41) FHIR conformance gate: a <b>finalized</b> result must transform
@@ -106,16 +108,75 @@ public class FhirResultDiagnosticReportValidationTest {
 
     @Test
     public void finalizedNumericResult_transformsToValidateCleanDiagnosticReportAndObservation() {
+        FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(fixture.analysis);
+
+        // A finalized result is FINAL on both resources (the slice's premise).
+        assertEquals(ObservationStatus.FINAL, observation.getStatus());
+        assertEquals(DiagnosticReportStatus.FINAL, diagnosticReport.getStatus());
+
+        // AC1 content: LOINC code, UCUM value quantity, and Patient subject.
+        assertEquals("http://loinc.org", observation.getCode().getCodingFirstRep().getSystem());
+        assertEquals("718-7", observation.getCode().getCodingFirstRep().getCode());
+        assertEquals(12.5, observation.getValueQuantity().getValue().doubleValue(), 1e-9);
+        assertEquals("g/dL", observation.getValueQuantity().getUnit());
+        assertEquals("Patient/44444444-4444-4444-4444-444444444444", observation.getSubject().getReference());
+
+        // The acceptance gate: both pass FHIR R4 instance validation ($validate).
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+    }
+
+    @Test
+    public void finalizedNumericResult_withoutTerminologyMappings_keepsRequiredCodeAsText() {
+        FhirResultFixture fixture = fixture("MCV", null, List.of());
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(fixture.analysis);
+
+        assertFalse(observation.getCode().hasCoding());
+        assertEquals("MCV", observation.getCode().getText());
+        assertFalse(diagnosticReport.getCode().hasCoding());
+        assertEquals("MCV", diagnosticReport.getCode().getText());
+
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+    }
+
+    @Test
+    public void finalizedNumericResult_withMappings_emitsLoincFirstDeterministically() {
+        FhirResultFixture fixture = fixture("Hemoglobin", null,
+                List.of(mapping("SNOMED", "271649006", "SAME_AS"), mapping("LOINC", "718-7", "SAME_AS")));
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(fixture.analysis);
+
+        assertEquals("http://loinc.org", observation.getCode().getCodingFirstRep().getSystem());
+        assertEquals("718-7", observation.getCode().getCodingFirstRep().getCode());
+        assertEquals("http://loinc.org", diagnosticReport.getCode().getCodingFirstRep().getSystem());
+        assertEquals("718-7", diagnosticReport.getCode().getCodingFirstRep().getCode());
+
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+    }
+
+    private static void assertNoFhirErrors(String label, ValidationResult validationResult) {
+        List<SingleValidationMessage> errors = validationResult.getMessages().stream()
+                .filter(message -> message.getSeverity() == ResultSeverityEnum.ERROR
+                        || message.getSeverity() == ResultSeverityEnum.FATAL)
+                .collect(Collectors.toList());
+        assertTrue(label + " failed FHIR $validate with ERROR/FATAL issues: " + errors, errors.isEmpty());
+    }
+
+    private FhirResultFixture fixture(String testDisplay, String legacyLoinc, List<TestTerminologyMapping> mappings) {
         final String finalizedStatusId = "6";
 
-        // A finalized, numeric observation: Hemoglobin 12.5 g/dL (LOINC 718-7).
         Localization testName = mock(Localization.class);
-        when(testName.getEnglish()).thenReturn("Hemoglobin");
+        when(testName.getEnglish()).thenReturn(testDisplay);
 
         org.openelisglobal.test.valueholder.Test test = mock(org.openelisglobal.test.valueholder.Test.class);
         when(test.getId()).thenReturn("1");
-        when(test.getLoinc()).thenReturn("718-7");
-        when(test.getName()).thenReturn("Hemoglobin");
+        when(test.getLoinc()).thenReturn(legacyLoinc);
+        when(test.getName()).thenReturn(testDisplay);
         when(test.getLocalizedTestName()).thenReturn(testName);
 
         Sample sample = mock(Sample.class);
@@ -137,44 +198,37 @@ public class FhirResultDiagnosticReportValidationTest {
         when(result.getValue(true)).thenReturn("12.5");
         when(result.getResultType()).thenReturn("N");
 
-        // Collaborators the transform path touches for a finalized numeric result.
         when(statusService.getStatusID(AnalysisStatus.Finalized)).thenReturn(finalizedStatusId);
         when(fhirConfig.getOeFhirSystem()).thenReturn("http://openelis-global.org");
         when(testService.get("1")).thenReturn(test);
+        when(testTerminologyMappingService.getActiveByTestId("1")).thenReturn(mappings);
         when(resultService.getResultsByAnalysis(analysis)).thenReturn(List.of(result));
         when(resultService.getUOM(result)).thenReturn("g/dL");
-        // A human patient on the sample, so the Observation carries a subject.
+
         Patient patient = mock(Patient.class);
         when(patient.getFhirUuidAsString()).thenReturn("44444444-4444-4444-4444-444444444444");
         when(sampleHumanService.getPatientForSample(sample)).thenReturn(patient);
-        // facilityOrganizationService.getFacilityId() defaults to null -> no facility
-        // identifier.
 
-        // Production transform under test.
-        Observation observation = fhirTransformService.transformResultToObservation(result);
-        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(analysis);
-
-        // A finalized result is FINAL on both resources (the slice's premise).
-        assertEquals(ObservationStatus.FINAL, observation.getStatus());
-        assertEquals(DiagnosticReportStatus.FINAL, diagnosticReport.getStatus());
-
-        // AC1 content: LOINC code, UCUM value quantity, and Patient subject.
-        assertEquals("http://loinc.org", observation.getCode().getCodingFirstRep().getSystem());
-        assertEquals("718-7", observation.getCode().getCodingFirstRep().getCode());
-        assertEquals(12.5, observation.getValueQuantity().getValue().doubleValue(), 1e-9);
-        assertEquals("g/dL", observation.getValueQuantity().getUnit());
-        assertEquals("Patient/44444444-4444-4444-4444-444444444444", observation.getSubject().getReference());
-
-        // The acceptance gate: both pass FHIR R4 instance validation ($validate).
-        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
-        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+        return new FhirResultFixture(analysis, result);
     }
 
-    private static void assertNoFhirErrors(String label, ValidationResult validationResult) {
-        List<SingleValidationMessage> errors = validationResult.getMessages().stream()
-                .filter(message -> message.getSeverity() == ResultSeverityEnum.ERROR
-                        || message.getSeverity() == ResultSeverityEnum.FATAL)
-                .collect(Collectors.toList());
-        assertTrue(label + " failed FHIR $validate with ERROR/FATAL issues: " + errors, errors.isEmpty());
+    private static TestTerminologyMapping mapping(String source, String code, String relationship) {
+        TestTerminologyMapping mapping = new TestTerminologyMapping();
+        mapping.setTestId("1");
+        mapping.setSource(source);
+        mapping.setCode(code);
+        mapping.setRelationship(relationship);
+        mapping.setIsActive("Y");
+        return mapping;
+    }
+
+    private static final class FhirResultFixture {
+        private final Analysis analysis;
+        private final Result result;
+
+        private FhirResultFixture(Analysis analysis, Result result) {
+            this.analysis = analysis;
+            this.result = result;
+        }
     }
 }

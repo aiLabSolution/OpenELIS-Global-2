@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!--
+      LIS-156 — re-run the OGC-939 test.loinc -> test_terminology_mapping
+      backfill after fork SD1 seeds. Those seeds land after upstream's original
+      043 backfill, leaving LOINC-carrying tests with an empty Terminology tab.
+      The insert is idempotent and uses the repaired SAME_AS relationship plus a
+      populated @Version column.
+    -->
+    <changeSet author="aiLabSolution" id="LIS-156-backfill-test-loinc-terminology">
+        <sql>
+            INSERT INTO clinlims.test_terminology_mapping
+                (id, test_id, source, code, relationship, is_active, lastupdated, last_updated)
+            SELECT gen_random_uuid()::varchar, t.id, 'LOINC', trim(t.loinc), 'SAME_AS', 'Y', now(), now()
+            FROM clinlims.test t
+            WHERE t.loinc IS NOT NULL
+              AND trim(t.loinc) &lt;&gt; ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM clinlims.test_terminology_mapping m
+                  WHERE m.test_id = t.id
+                    AND m.source = 'LOINC'
+                    AND m.code = trim(t.loinc)
+              );
+        </sql>
+        <!-- One-way data repair: deleting inserted SAME_AS rows on rollback could
+             remove legitimate user-entered mappings with the same natural key. -->
+        <rollback/>
+    </changeSet>
+</databaseChangeLog>
