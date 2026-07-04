@@ -40,15 +40,18 @@ import org.springframework.test.util.ReflectionTestUtils;
  * duplicated per import path.
  * </p>
  * <p>
- * Three cases:
+ * Three cases (fail-visible contract, LIS-121):
  * <ol>
  * <li><b>No previous row</b> — fresh insert.</li>
- * <li><b>Exact re-import</b> — same key AND same completeDate OR same result
- * value: skip silently (idempotent).</li>
- * <li><b>Corrected re-export</b> — same key but DIFFERENT completeDate AND
- * DIFFERENT result value: insert the new row as a linked correction
- * ({@code readOnly=true}, {@code duplicateAnalyzerResultId} backlink on both
- * rows).</li>
+ * <li><b>True re-import</b> — same key AND same completeDate AND same result
+ * value: skip silently (idempotent re-POST of the same message).</li>
+ * <li><b>Anything else on an existing key</b> — insert the new row as a linked
+ * correction ({@code readOnly=true}, {@code duplicateAnalyzerResultId} backlink
+ * on both rows) so the tech sees it. A re-run with an equal value on a
+ * different date, or a corrected value re-sent with the same completion date,
+ * must never be silently dropped — the accession key carries no patient
+ * dimension, so a silent skip can lose a different sample's (or patient's)
+ * result outright.</li>
  * </ol>
  * This layout matches the plan mellow-honking-cascade Phase 1.6 upsert
  * invariants ({@code sampleAccession}, {@code testCode}, {@code analyzerId}) as
@@ -118,14 +121,14 @@ public class AnalyzerResultsServiceImplTest {
     }
 
     // ------------------------------------------------------------------
-    // Case 2 — exact re-import: skip silently (idempotent)
+    // Case 2 — true re-import (same date AND same value): skip silently
     // ------------------------------------------------------------------
 
     @Test
-    public void reImport_sameCompleteDate_skipsInsertAndUpdate() {
+    public void reImport_sameCompleteDateAndSameValue_skipsInsertAndUpdate() {
         Timestamp when = new Timestamp(1_700_000_000_000L);
         AnalyzerResults existing = existingRow("42", "1520.5", when);
-        AnalyzerResults incoming = newIncoming("9999.9", when); // different value, SAME date
+        AnalyzerResults incoming = newIncoming("1520.5", when); // SAME value, SAME date
         when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
 
         service.insertAnalyzerResults(List.of(incoming), USER_ID);
@@ -135,10 +138,46 @@ public class AnalyzerResultsServiceImplTest {
     }
 
     @Test
-    public void reImport_sameResultValue_skipsInsertAndUpdate() {
+    public void correctedValueOnSameCompleteDate_stagesLinkedCorrection() {
+        // LIS-121: a corrected value re-sent with the same completion timestamp
+        // used to be silently dropped (same-date alone counted as a re-import).
+        Timestamp when = new Timestamp(1_700_000_000_000L);
+        AnalyzerResults existing = existingRow("42", "1520.5", when);
+        AnalyzerResults incoming = newIncoming("9999.9", when); // different value, SAME date
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
+
+        service.insertAnalyzerResults(List.of(incoming), USER_ID);
+
+        verify(baseObjectDAO, times(1)).insert(any(AnalyzerResults.class));
+        verify(baseObjectDAO, times(1)).update(any(AnalyzerResults.class));
+        assertTrue("must surface for review, not vanish", incoming.isReadOnly());
+        assertEquals("42", incoming.getDuplicateAnalyzerResultId());
+    }
+
+    @Test
+    public void sameValueOnDifferentCompleteDate_stagesLinkedCorrection() {
+        // LIS-121: the silent-loss scenario — a NEW run whose value happens to
+        // equal the previous run's (common for a stable analyte) used to be
+        // dropped outright and never reach the tech.
         AnalyzerResults existing = existingRow("42", "1520.5", new Timestamp(1_700_000_000_000L));
         AnalyzerResults incoming = newIncoming("1520.5", new Timestamp(1_800_000_000_000L)); // same value, different
                                                                                              // date
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
+
+        service.insertAnalyzerResults(List.of(incoming), USER_ID);
+
+        verify(baseObjectDAO, times(1)).insert(any(AnalyzerResults.class));
+        verify(baseObjectDAO, times(1)).update(any(AnalyzerResults.class));
+        assertTrue("must surface for review, not vanish", incoming.isReadOnly());
+        assertEquals("42", incoming.getDuplicateAnalyzerResultId());
+    }
+
+    @Test
+    public void reImport_bothNullDates_sameValue_skipsAsTrueReImport() {
+        // Timestamp-less analyzers: null completeDate on both sides + equal value
+        // is the closest thing to an idempotency key the wire offers — skip.
+        AnalyzerResults existing = existingRow("42", "1520.5", null);
+        AnalyzerResults incoming = newIncoming("1520.5", null);
         when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
 
         service.insertAnalyzerResults(List.of(incoming), USER_ID);
@@ -183,10 +222,9 @@ public class AnalyzerResultsServiceImplTest {
     @Test
     public void reImport_bothCompleteDateAndResultNull_isTreatedAsCorrection() {
         // Pathological case: a previously-staged row with null completeDate AND
-        // null result value. The loop never satisfies the "duplicate" predicate,
-        // so the incoming row is inserted as a linked correction. This test
-        // documents current behavior — if we want null+null to be a no-op skip
-        // instead, the fix is a null-guarded early-return in the loop.
+        // null result value against an incoming row with real values. Nothing
+        // matches, so the incoming row stages as a linked correction — visible,
+        // never dropped.
         AnalyzerResults existing = existingRow("old-id-99", null, null);
         AnalyzerResults incoming = newIncoming("new-value", new Timestamp(1_800_000_000_000L));
         when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
@@ -205,21 +243,27 @@ public class AnalyzerResultsServiceImplTest {
     public void mixedBatch_eachResultEvaluatedIndependently() {
         AnalyzerResults freshA = newIncoming("100", new Timestamp(1L));
         AnalyzerResults freshB = newIncoming("200", new Timestamp(2L));
-        AnalyzerResults dupeC = newIncoming("300", new Timestamp(3L));
+        AnalyzerResults dupeC = newIncoming("300", new Timestamp(3L)); // same value, different date
+        AnalyzerResults exactD = newIncoming("400", new Timestamp(4L)); // true re-import
 
         AnalyzerResults existingForC = existingRow("existing-c", "300", new Timestamp(999L));
+        AnalyzerResults existingForD = existingRow("existing-d", "400", new Timestamp(4L));
 
         when(baseObjectDAO.getDuplicateResultByAccessionAndTest(freshA)).thenReturn(null);
         when(baseObjectDAO.getDuplicateResultByAccessionAndTest(freshB)).thenReturn(null);
         when(baseObjectDAO.getDuplicateResultByAccessionAndTest(dupeC)).thenReturn(List.of(existingForC));
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(exactD)).thenReturn(List.of(existingForD));
 
         List<AnalyzerResults> batch = new ArrayList<>();
-        Collections.addAll(batch, freshA, freshB, dupeC);
+        Collections.addAll(batch, freshA, freshB, dupeC, exactD);
         service.insertAnalyzerResults(batch, USER_ID);
 
-        // Two fresh inserts, zero for the dupe
-        verify(baseObjectDAO, times(2)).insert(any(AnalyzerResults.class));
-        verify(baseObjectDAO, never()).update(any(AnalyzerResults.class));
+        // Two fresh inserts + one visible correction for C; the exact re-import D
+        // is the only row skipped.
+        verify(baseObjectDAO, times(3)).insert(any(AnalyzerResults.class));
+        verify(baseObjectDAO, times(1)).update(any(AnalyzerResults.class));
+        assertTrue(dupeC.isReadOnly());
+        assertNull(exactD.getId());
     }
 
     @Test

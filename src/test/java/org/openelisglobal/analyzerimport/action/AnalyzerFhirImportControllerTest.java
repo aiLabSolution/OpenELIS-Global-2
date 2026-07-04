@@ -124,6 +124,74 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         verify(analyzerResultsService).insertAnalyzerResults(anyList(), eq("1"));
     }
 
+    /**
+     * LIS-122/LIS-123: the bridge now emits one Specimen per wire specimen
+     * (multi-OBR / multi-O-record transmissions) with each Observation referencing
+     * its own Specimen, plus a Patient resource for identity. Each Observation must
+     * stage under its own accession — never collapsed onto a shared one — and the
+     * Patient resource must pass through harmlessly.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_MultiSpecimenBundle_StagesEachObservationUnderItsOwnAccession() throws Exception {
+        String bundleJson = "{\n" + "  \"resourceType\": \"Bundle\",\n" + "  \"type\": \"transaction\",\n"
+                + "  \"entry\": [\n" + "    {\n" + "      \"fullUrl\": \"urn:uuid:patient-1\",\n"
+                + "      \"resource\": {\n" + "        \"resourceType\": \"Patient\",\n"
+                + "        \"identifier\": [{\"value\": \"778\"}]\n" + "      }\n" + "    },\n" + "    {\n"
+                + "      \"fullUrl\": \"urn:uuid:specimen-1\",\n" + "      \"resource\": {\n"
+                + "        \"resourceType\": \"Specimen\",\n" + "        \"identifier\": [{\"value\": \"SPEC-A\"}],\n"
+                + "        \"subject\": {\"reference\": \"urn:uuid:patient-1\"}\n" + "      }\n" + "    },\n"
+                + "    {\n" + "      \"fullUrl\": \"urn:uuid:specimen-2\",\n" + "      \"resource\": {\n"
+                + "        \"resourceType\": \"Specimen\",\n" + "        \"identifier\": [{\"value\": \"SPEC-B\"}]\n"
+                + "      }\n" + "    },\n" + "    {\n" + "      \"resource\": {\n"
+                + "        \"resourceType\": \"Observation\",\n"
+                + "        \"specimen\": {\"reference\": \"urn:uuid:specimen-1\"},\n"
+                + "        \"subject\": {\"reference\": \"urn:uuid:patient-1\"},\n"
+                + "        \"code\": {\"coding\": [{\"code\": \"GLU\"}]},\n" + "        \"valueString\": \"98\"\n"
+                + "      }\n" + "    },\n" + "    {\n" + "      \"resource\": {\n"
+                + "        \"resourceType\": \"Observation\",\n"
+                + "        \"specimen\": {\"reference\": \"urn:uuid:specimen-2\"},\n"
+                + "        \"code\": {\"coding\": [{\"code\": \"NA\"}]},\n" + "        \"valueString\": \"140\"\n"
+                + "      }\n" + "    }\n" + "  ]\n" + "}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.resultsInserted").value(2));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
+        org.junit.Assert.assertEquals(2, inserted.size());
+        org.junit.Assert.assertEquals("SPEC-A", inserted.get(0).getAccessionNumber());
+        org.junit.Assert.assertEquals("GLU", inserted.get(0).getTestName());
+        org.junit.Assert.assertEquals("SPEC-B", inserted.get(1).getAccessionNumber());
+        org.junit.Assert.assertEquals("NA", inserted.get(1).getTestName());
+    }
+
+    /**
+     * The Observation.subject.identifier fallback reads an INLINE identifier as the
+     * accession. A subject that is only a reference to a Patient resource (what the
+     * bridge emits) must never be misread as an accession: an Observation with no
+     * Specimen reference and a reference-only subject is skipped, not staged under
+     * the reference string or the patient's MRN.
+     */
+    @Test
+    public void importFhirBundle_SubjectReferenceOnlyWithoutSpecimen_IsSkippedNotStagedUnderMrn() throws Exception {
+        String bundleJson = "{\n" + "  \"resourceType\": \"Bundle\",\n" + "  \"type\": \"transaction\",\n"
+                + "  \"entry\": [\n" + "    {\n" + "      \"fullUrl\": \"urn:uuid:patient-1\",\n"
+                + "      \"resource\": {\n" + "        \"resourceType\": \"Patient\",\n"
+                + "        \"identifier\": [{\"value\": \"778\"}]\n" + "      }\n" + "    },\n" + "    {\n"
+                + "      \"resource\": {\n" + "        \"resourceType\": \"Observation\",\n"
+                + "        \"subject\": {\"reference\": \"urn:uuid:patient-1\"},\n"
+                + "        \"code\": {\"coding\": [{\"code\": \"GLU\"}]},\n" + "        \"valueString\": \"98\"\n"
+                + "      }\n" + "    }\n" + "  ]\n" + "}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
+
+        verify(analyzerResultsService, never()).insertAnalyzerResults(anyList(), eq("1"));
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     public void importFhirBundle_QcTaggedObservation_PersistsControlResult() throws Exception {

@@ -97,16 +97,18 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
      * </p>
      * <ol>
      * <li><b>No previous row</b> — fresh insert, nothing flagged.</li>
-     * <li><b>Exact re-import</b> — previous row with the same key AND
-     * ({@code completeDate} equal OR {@code result} value equal): skip silently.
+     * <li><b>True re-import</b> — previous row with the same key AND
+     * {@code completeDate} equal AND {@code result} value equal: skip silently.
      * This makes re-dropping an identical file completely idempotent (the "same
      * file output twice" scenario).</li>
-     * <li><b>Corrected re-export</b> — previous row with the same key but BOTH
-     * {@code completeDate} AND {@code result} value differ: insert the incoming row
-     * as a linked correction ({@code readOnly=true},
-     * {@code duplicateAnalyzerResultId} backlink on both rows). The staging UI then
-     * shows both rows linked so a tech can pick which to accept. This preserves an
-     * implicit audit trail without a separate history table.</li>
+     * <li><b>Anything else on an existing key</b> — insert the incoming row as a
+     * linked correction ({@code readOnly=true}, {@code duplicateAnalyzerResultId}
+     * backlink on both rows). The staging UI then shows both rows linked so a tech
+     * can pick which to accept. This preserves an implicit audit trail without a
+     * separate history table. Skipping on date-or-value alone silently lost results
+     * (a re-run with an unchanged value, or a corrected value re-sent with the same
+     * completion timestamp) — and the key carries no patient dimension, so the lost
+     * row can belong to a different sample or patient (LIS-121).</li>
      * </ol>
      *
      * <p>
@@ -127,21 +129,26 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
                 List<AnalyzerResults> previousResults = baseObjectDAO.getDuplicateResultByAccessionAndTest(result);
                 AnalyzerResults previousResult = null;
 
-                // Duplicate detection: skip insert if an existing staging entry matches.
-                // Match on timestamp (instrument date) OR result value (re-import of same
-                // data).
-                // This makes re-importing the same file idempotent while still staging
-                // genuinely new results (corrections with different values) for user review.
+                // Duplicate detection: skip insert ONLY for a true re-import — an
+                // existing staging entry with the SAME completeDate AND the SAME
+                // value (an idempotent re-POST of the same message). Anything else
+                // on an existing (analyzer, accession, test) key stages as a
+                // read-only linked correction so the tech sees it. Matching on
+                // date-or-value alone silently dropped real results: a re-run whose
+                // value equals the previous run's, or a corrected value re-sent
+                // with the same completion timestamp — and the key carries no
+                // patient dimension, so the dropped result can belong to a
+                // different sample or patient entirely (LIS-121).
                 if (previousResults != null) {
                     duplicateByAccessionAndTestOnly = true;
                     for (AnalyzerResults foundResult : previousResults) {
                         previousResult = foundResult;
-                        if (foundResult.getCompleteDate() != null
-                                && foundResult.getCompleteDate().equals(result.getCompleteDate())) {
-                            duplicateByAccessionAndTestOnly = false;
-                            break;
-                        }
-                        if (foundResult.getResult() != null && foundResult.getResult().equals(result.getResult())) {
+                        boolean sameCompleteDate = foundResult.getCompleteDate() == null
+                                ? result.getCompleteDate() == null
+                                : foundResult.getCompleteDate().equals(result.getCompleteDate());
+                        boolean sameValue = foundResult.getResult() == null ? result.getResult() == null
+                                : foundResult.getResult().equals(result.getResult());
+                        if (sameCompleteDate && sameValue) {
                             duplicateByAccessionAndTestOnly = false;
                             break;
                         }
