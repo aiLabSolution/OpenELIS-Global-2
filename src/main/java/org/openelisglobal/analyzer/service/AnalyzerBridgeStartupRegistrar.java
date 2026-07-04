@@ -154,6 +154,13 @@ public class AnalyzerBridgeStartupRegistrar {
                         p.put("name", a.getName());
                         p.put("protocol",
                                 a.getProtocolVersion() != null && a.getProtocolVersion().isHl7() ? "HL7" : "ASTM");
+                        // Same REPLACE rule as the maps below: /register sends
+                        // identifierPattern, so the sync payload must too or
+                        // every OE restart resets it (bridge falls back to
+                        // name/id matching).
+                        if (a.getIdentifierPattern() != null && !a.getIdentifierPattern().isBlank()) {
+                            p.put("identifierPattern", a.getIdentifierPattern());
+                        }
                         // The bridge's /sync is a full REPLACE: any field missing
                         // here is reset to empty on every webapp restart. LIS-98:
                         // omitting testCodeLoinc silently wiped the code→LOINC map

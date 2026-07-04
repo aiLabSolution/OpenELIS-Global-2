@@ -293,10 +293,22 @@ public class BridgeRegistrationService {
      * bridge-registry write paths must carry the same maps (LIS-98).
      */
     public java.util.Map<String, String> buildTestCodeLoinc(String oeAnalyzerId) {
+        if (analyzerTestMappingService == null) {
+            return new java.util.LinkedHashMap<>();
+        }
+        return buildTestCodeLoinc(analyzerTestMappingService.getAllForAnalyzer(oeAnalyzerId));
+    }
+
+    /**
+     * Overload for callers that already fetched the analyzer's mapping rows (e.g.
+     * the REST serializer, which needs them for {@code testMappings} too) — avoids
+     * re-querying per serialization.
+     */
+    public java.util.Map<String, String> buildTestCodeLoinc(
+            java.util.List<org.openelisglobal.analyzerimport.valueholder.AnalyzerTestMapping> mappings) {
         java.util.Map<String, String> codeToLoinc = new java.util.LinkedHashMap<>();
-        if (analyzerTestMappingService != null && testService != null) {
-            for (org.openelisglobal.analyzerimport.valueholder.AnalyzerTestMapping m : analyzerTestMappingService
-                    .getAllForAnalyzer(oeAnalyzerId)) {
+        if (mappings != null && testService != null) {
+            for (org.openelisglobal.analyzerimport.valueholder.AnalyzerTestMapping m : mappings) {
                 String code = m.getAnalyzerTestName();
                 String testId = m.getTestId();
                 if (code == null || code.isBlank() || testId == null) {

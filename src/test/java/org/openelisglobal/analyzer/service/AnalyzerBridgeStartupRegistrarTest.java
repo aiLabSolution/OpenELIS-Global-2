@@ -1,7 +1,6 @@
 package org.openelisglobal.analyzer.service;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
@@ -107,6 +106,7 @@ public class AnalyzerBridgeStartupRegistrarTest {
     @Test
     public void syncPayloadsAfterRegisterCarryTranslationMaps() {
         analyzer.setIpAddress("10.0.0.5");
+        analyzer.setIdentifierPattern("H60.*");
         analyzer.setImportDirectory("/data/analyzer-imports/sd1");
         analyzer.setFilePattern("*.csv");
 
@@ -117,7 +117,15 @@ public class AnalyzerBridgeStartupRegistrarTest {
 
         registrar.onStartup(rootContextRefreshedEvent());
 
-        verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS)).syncAll(argThat(payloads -> payloads.size() == 2));
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<Map<String, Object>>> captor = org.mockito.ArgumentCaptor
+                .forClass((Class) List.class);
+        verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS)).syncAll(captor.capture());
+        List<Map<String, Object>> payloads = captor.getValue();
+        org.junit.Assert.assertEquals(2, payloads.size());
+        // The TCP payload must carry identifierPattern — /register sends it,
+        // so a sync REPLACE without it resets the bridge's identity check.
+        org.junit.Assert.assertEquals("H60.*", payloads.get(0).get("identifierPattern"));
         // One TCP payload + one FILE payload, each carrying all four
         // REPLACE-sensitive attachments.
         verify(bridgeRegistrationService, times(2)).attachQcRules(any(), eq("2009"));

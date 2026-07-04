@@ -137,10 +137,13 @@ public class AnalyzerRestController extends BaseRestController {
         try {
             List<Analyzer> analyzers = analyzerService.getAllWithTypes();
             Set<String> loadedPlugins = getLoadedPluginClassNames();
+            // Lab-global (one native query) — build once for the whole list,
+            // not per analyzer.
+            Map<String, String> testUnitUcum = bridgeRegistrationService.buildTestUnitUcum();
             List<Map<String, Object>> analyzerList = new ArrayList<>();
 
             for (Analyzer analyzer : analyzers) {
-                Map<String, Object> analyzerMap = analyzerToMap(analyzer, loadedPlugins);
+                Map<String, Object> analyzerMap = analyzerToMap(analyzer, loadedPlugins, testUnitUcum);
 
                 // Skip DELETED analyzers (soft-deleted with 90-day window)
                 String analyzerStatus = (String) analyzerMap.get("status");
@@ -641,6 +644,11 @@ public class AnalyzerRestController extends BaseRestController {
      * fields directly from the Analyzer entity (2-table model).
      */
     private Map<String, Object> analyzerToMap(Analyzer analyzer, Set<String> loadedPlugins) {
+        return analyzerToMap(analyzer, loadedPlugins, bridgeRegistrationService.buildTestUnitUcum());
+    }
+
+    private Map<String, Object> analyzerToMap(Analyzer analyzer, Set<String> loadedPlugins,
+            Map<String, String> testUnitUcum) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("id", analyzer.getId());
         map.put("name", analyzer.getName());
@@ -700,8 +708,9 @@ public class AnalyzerRestController extends BaseRestController {
         // own content OR the tech's upload-time declaration, never from
         // persistent config on the analyzer instance. See plan
         // mellow-honking-cascade §2.WIRE.
-        List<String> testMappings = analyzerTestMappingService.getAllForAnalyzer(analyzer.getId()).stream()
-                .map(AnalyzerTestMapping::getAnalyzerTestName).distinct().collect(Collectors.toList());
+        List<AnalyzerTestMapping> mappingRows = analyzerTestMappingService.getAllForAnalyzer(analyzer.getId());
+        List<String> testMappings = mappingRows.stream().map(AnalyzerTestMapping::getAnalyzerTestName).distinct()
+                .collect(Collectors.toList());
         map.put("testMappings", testMappings);
 
         // Translation maps for the bridge's startup pull (LIS-98). The pull
@@ -709,8 +718,8 @@ public class AnalyzerRestController extends BaseRestController {
         // response must carry the same maps as the register/sync payloads —
         // otherwise a bridge restart strips code→LOINC translation until OE
         // re-registers. Field names match the RegistrationRequest contract.
-        map.put("testCodeLoinc", bridgeRegistrationService.buildTestCodeLoinc(analyzer.getId()));
-        map.put("testUnitUcum", bridgeRegistrationService.buildTestUnitUcum());
+        map.put("testCodeLoinc", bridgeRegistrationService.buildTestCodeLoinc(mappingRows));
+        map.put("testUnitUcum", testUnitUcum);
 
         // Derive plugin type info from analyzer_type FK
         boolean isGeneric = analyzer.getAnalyzerType() != null && analyzer.getAnalyzerType().isGenericPlugin();
