@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-183 (follows LIS-149) — EDAN H90-series CBC+DIFF LOINC seed      -->
+    <!--                                                                    -->
+    <!-- The EDAN H99S/H60S hematology analyzer (LIS-149 worklist + OBR-20   -->
+    <!-- reconcile; ADR-0013) attaches to the openelis-analyzer-bridge over   -->
+    <!-- HL7 v2.3.1/MLLP. As with the Seamaty SD1 seed (049), OE2's inbound   -->
+    <!-- FHIR ingest binds results by LOINC only (AnalyzerFhirImportControl-  -->
+    <!-- ler.resolveLoincTest -> TestService.getTestsByLoincCode), and the     -->
+    <!-- bridge's own registration push (BridgeRegistrationService.attach-    -->
+    <!-- TestCodeLoinc) derives its code->LOINC map from AnalyzerTestMapping   -->
+    <!-- rows (analyzer_test_name -> test_id) joined to Test.loinc. So every   -->
+    <!-- analyte the H99S emits needs BOTH a clinlims.test row carrying its    -->
+    <!-- LOINC and a clinlims.analyzer_test_map row binding the wire code to   -->
+    <!-- that test, under an 'EDAN H99S' analyzer row.                        -->
+    <!--                                                                    -->
+    <!-- The H99S CBC+DIFF panel is wider than the core OE catalog: WBC, RBC,  -->
+    <!-- HGB, HCT, MCV, MCH, MCHC, PLT, RDW-CV, MPV, NEU#, LYM#, LYM%, MON#,   -->
+    <!-- MON% already exist as OE Test rows with LOINCs in the LabSolution     -->
+    <!-- hematology catalog (present on bench/prod); this seed REUSES, never    -->
+    <!-- re-creates them (the same catalog dependency 049 has on Glucose/       -->
+    <!-- Creatinine), so it must not insert competing CBC rows that would       -->
+    <!-- collide by LOINC with the catalog import. They are only mapped here    -->
+    <!-- (changeset 3), and map only where that catalog is present. The         -->
+    <!-- remaining 13 analytes have no existing OE Test/LOINC and are           -->
+    <!-- inserted fresh (changeset 1), named "<CODE>(Whole Blood)" to match     -->
+    <!-- the existing English CBC naming convention for this specimen type:    -->
+    <!--   NEU%(Whole Blood)  -> 770-8    (Neutrophils/100 leukocytes)         -->
+    <!--   EOS#(Whole Blood)  -> 711-2    (Eosinophils #/vol)                 -->
+    <!--   EOS%(Whole Blood)  -> 713-8    (Eosinophils/100 leukocytes)        -->
+    <!--   BAS#(Whole Blood)  -> 704-7    (Basophils #/vol)                   -->
+    <!--   BAS%(Whole Blood)  -> 706-2    (Basophils/100 leukocytes)          -->
+    <!--   NRBC#(Whole Blood) -> 771-6    (Nucleated RBC #/vol)               -->
+    <!--   NRBC%(Whole Blood) -> 58413-6  (Nucleated RBC/100 leukocytes)      -->
+    <!--   RDW-SD(Whole Blood)-> 21000-5  (RDW standard deviation)            -->
+    <!--   PCT(Whole Blood)   -> 51637-7  (Plateletcrit)                      -->
+    <!--   IMG#(Whole Blood)  -> 53115-2  (Immature granulocytes #/vol)       -->
+    <!--   IMG%(Whole Blood)  -> 38518-7  (Immature granulocytes/100 leuko.)  -->
+    <!--   RET#(Whole Blood)  -> 60474-4  (Reticulocytes #/vol)               -->
+    <!--   RET%(Whole Blood)  -> 17849-1  (Reticulocytes/100 erythrocytes)    -->
+    <!--                                                                    -->
+    <!-- The wire-code -> LOINC map (changeset 3) carries all 30 codes,        -->
+    <!-- including both the existing-catalog analytes and the 13 above. RDW    -->
+    <!-- is mapped under BOTH spellings the H99S is known to emit on the wire  -->
+    <!-- (RDW-CV/RDW_CV -> 788-0 and RDW-SD/RDW_SD -> 21000-5) since the        -->
+    <!-- hyphen-vs-underscore separator varies by message (see the H90-series   -->
+    <!-- field-repurposing notes from the LIS-149/H60S bench work). Unmapped    -->
+    <!-- codes are silently skipped (NOT EXISTS guard) rather than failing,     -->
+    <!-- exactly like lis86-004, so this seed is safe to apply before or after  -->
+    <!-- any given catalog test row exists.                                    -->
+    <!--                                                                    -->
+    <!-- U/L, fL, pg, % -> UCUM is NOT seeded here: the bridge's unit->UCUM     -->
+    <!-- model is out of scope for this changeset (tracked separately, as in    -->
+    <!-- 049/LIS-87).                                                          -->
+    <!--                                                                    -->
+    <!-- All changesets are idempotent (preConditions / NOT EXISTS guards),     -->
+    <!-- have no context attribute (so they reach the integration-test          -->
+    <!-- harness, like 049/050), and each has an explicit rollback. The         -->
+    <!-- analyzer is seeded in SETUP status with no transport (ip/port) — the   -->
+    <!-- operator configures the transport at deploy, as with Seamaty SD1.      -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis183-001-insert-edan-cbc-diff-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <columnExists schemaName="clinlims" tableName="test" columnName="loinc"/>
+        </preConditions>
+        <comment>Insert the EDAN H99S/H60S CBC+DIFF analytes with no existing OE Test/LOINC (NEU%, EOS#/%, BAS#/%, NRBC#/%, RDW-SD, PCT, IMG#/%, RET#/%), reusing the WBC row's Hematology test_section when present (LIS-183).</comment>
+        <sql>
+            INSERT INTO clinlims.test (id, name, description, loinc, is_active, is_reportable, orderable, test_section_id, guid, lastupdated)
+            SELECT nextval('clinlims.test_seq'), v.name, v.name, v.loinc, 'Y', 'Y', true,
+                   (SELECT t2.test_section_id FROM clinlims.test t2 WHERE t2.loinc = '6690-2' AND t2.test_section_id IS NOT NULL LIMIT 1),
+                   gen_random_uuid()::varchar, now()
+            FROM (VALUES
+                    ('NEU%(Whole Blood)',   '770-8'),
+                    ('EOS#(Whole Blood)',   '711-2'),
+                    ('EOS%(Whole Blood)',   '713-8'),
+                    ('BAS#(Whole Blood)',   '704-7'),
+                    ('BAS%(Whole Blood)',   '706-2'),
+                    ('NRBC#(Whole Blood)',  '771-6'),
+                    ('NRBC%(Whole Blood)',  '58413-6'),
+                    ('RDW-SD(Whole Blood)', '21000-5'),
+                    ('PCT(Whole Blood)',    '51637-7'),
+                    ('IMG#(Whole Blood)',   '53115-2'),
+                    ('IMG%(Whole Blood)',   '38518-7'),
+                    ('RET#(Whole Blood)',   '60474-4'),
+                    ('RET%(Whole Blood)',   '17849-1')
+                 ) AS v(name, loinc)
+            WHERE NOT EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
+        </sql>
+        <rollback>
+            <!-- Safe: these 13 LOINCs do not pre-exist in any OE catalog (verified against the
+                 full test.loinc inventory + loinc.org), so scoping by loinc + the "(Whole Blood)"
+                 name this seed assigns deletes only rows this changeset created. -->
+            <sql>
+                DELETE FROM clinlims.test
+                    WHERE loinc IN ('770-8', '711-2', '713-8', '704-7', '706-2', '771-6', '58413-6',
+                                     '21000-5', '51637-7', '53115-2', '38518-7', '60474-4', '17849-1')
+                    AND description LIKE '%(Whole Blood)';
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis183-002-seed-edan-analyzer" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer"/>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'EDAN H99S'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Seed the EDAN H99S analyzer (SETUP status, HL7 v2.3.1; transport configured by the operator at deploy) (LIS-183). fhir_uuid is set explicitly (like 004's backfill) so this insert satisfies the NOT NULL + UNIQUE fhir_uuid constraint 004 adds on deployments where it was applied.</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer (id, name, description, is_active, status, protocol_version, analyzer_type, fhir_uuid, last_updated)
+            VALUES (nextval('clinlims.analyzer_seq'), 'EDAN H99S', 'EDAN H90-series hematology analyzer (H99S/H60S), HL7 MLLP', true, 'SETUP', 'HL7_V2_3_1', 'HEMATOLOGY', gen_random_uuid(), now());
+        </sql>
+        <rollback>
+            <sql>DELETE FROM clinlims.analyzer WHERE name = 'EDAN H99S';</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis183-003-map-edan-codes-to-loinc-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'EDAN H99S'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the 30 EDAN H99S CBC+DIFF wire codes (OBX-4, per the H90-series field-repurposing profile) to the OE Test carrying each LOINC, including both RDW-CV/RDW_CV and RDW-SD/RDW_SD separator spellings, so attachTestCodeLoinc emits the code->LOINC pairs the bridge applies (LIS-183). The EXISTS-test guard is a deliberate catalog dependency: the 13 diff/index analytes above are created by changeset 1 and always map, while the CBC/index/differential codes (WBC..MON%, RDW-CV) map only where their LOINC-bearing Test already exists — the LabSolution hematology catalog, reused not re-created here (the same dependency 049 has on Glucose/Creatinine). So on the target (bench/prod, catalog present) all 30 map; on a bare demo without the CBC catalog only the 14 seed-created analytes map (codes whose test is absent are skipped, never mapped to a NULL test_id).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, v.code,
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   now()
+            FROM clinlims.analyzer a
+            CROSS JOIN (VALUES
+                    ('WBC',     '6690-2'),
+                    ('RBC',     '789-8'),
+                    ('HGB',     '718-7'),
+                    ('HCT',     '4544-3'),
+                    ('MCV',     '787-2'),
+                    ('MCH',     '785-6'),
+                    ('MCHC',    '786-4'),
+                    ('PLT',     '777-3'),
+                    ('RDW-CV',  '788-0'),
+                    ('RDW_CV',  '788-0'),
+                    ('MPV',     '32623-1'),
+                    ('NEU#',    '751-8'),
+                    ('NEU%',    '770-8'),
+                    ('LYM#',    '731-0'),
+                    ('LYM%',    '736-9'),
+                    ('MON#',    '742-7'),
+                    ('MON%',    '5905-5'),
+                    ('EOS#',    '711-2'),
+                    ('EOS%',    '713-8'),
+                    ('BAS#',    '704-7'),
+                    ('BAS%',    '706-2'),
+                    ('NRBC#',   '771-6'),
+                    ('NRBC%',   '58413-6'),
+                    ('RDW-SD',  '21000-5'),
+                    ('RDW_SD',  '21000-5'),
+                    ('PCT',     '51637-7'),
+                    ('IMG#',    '53115-2'),
+                    ('IMG%',    '38518-7'),
+                    ('RET#',    '60474-4'),
+                    ('RET%',    '17849-1')
+                 ) AS v(code, loinc)
+            WHERE a.name = 'EDAN H99S'
+              AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+              AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_test_map m
+                    WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
+        </sql>
+        <rollback>
+            <!-- Delete ONLY the codes whose Test rows changeset 1 creates (the 13 diff/index
+                 analytes + the RDW_SD spelling). These never pre-exist, so removing them is
+                 provably safe. The 16 catalog codes (WBC..MON%, RDW-CV/RDW_CV) are deliberately
+                 NOT rolled back: on the bench their map rows pre-date this seed, and a rollback
+                 must never delete config it did not create. Worst case this leaves idempotent
+                 map rows a re-apply would re-add — the safe direction. -->
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                    WHERE analyzer_test_name IN (
+                        'NEU%', 'EOS#', 'EOS%', 'BAS#', 'BAS%', 'NRBC#', 'NRBC%',
+                        'RDW-SD', 'RDW_SD', 'PCT', 'IMG#', 'IMG%', 'RET#', 'RET%')
+                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'EDAN H99S');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
