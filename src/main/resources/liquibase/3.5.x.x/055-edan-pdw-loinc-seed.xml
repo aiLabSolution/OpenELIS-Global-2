@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-192 (follows LIS-183) — EDAN H99S PDW analyte LOINC seed         -->
+    <!--                                                                    -->
+    <!-- PDW (platelet distribution width) is the one platelet index the      -->
+    <!-- LIS-183 CBC+DIFF seed (052) deliberately deferred ("item 3"): the     -->
+    <!-- H99S/H60S emit PDW with an EMPTY OBX-6 unit, so its LOINC could not    -->
+    <!-- be chosen between the two candidates without evidence —              -->
+    <!--   32207-3  PDW [Entitic volume] (fL)   vs   51631-0  PDW [ratio] (%). -->
+    <!-- The LIS-192 disposition analysis resolved this to the fL/EntVol form   -->
+    <!-- (32207-3): the EDAN H90-series User manual (Appendix 3.7) states the    -->
+    <!-- PDW unit is fL directly, with an H99S default reference interval of     -->
+    <!-- 10.0–17.4 fL; the 2026-07-08 real-wire CD-mode capture emitted PDW      -->
+    <!-- unit-less with value 13.66 (within that fL interval), not a %/CV band.  -->
+    <!-- See docs/reviews/lis-192-h99s-extended-param-disposition/ (disposition   -->
+    <!-- matrix + manual verification, Pinote/DEC-01).                          -->
+    <!--                                                                    -->
+    <!-- Like 052/049, OE2 inbound FHIR ingest binds by LOINC only and the      -->
+    <!-- bridge derives its code->LOINC map from analyzer_test_map joined to    -->
+    <!-- Test.loinc, so PDW needs BOTH a clinlims.test row carrying 32207-3     -->
+    <!-- and an analyzer_test_map row binding wire code 'PDW' to it, under the   -->
+    <!-- existing 'EDAN H99S' analyzer (seeded by 052 changeset 2 — reused,     -->
+    <!-- not re-created, here).                                                -->
+    <!--                                                                    -->
+    <!-- Scope note: only 'PDW' is mapped. PDW-SD, P-LCR/P-LCC and the other    -->
+    <!-- extended/CD-mode channels are dispositioned separately in the LIS-192   -->
+    <!-- matrix (PDW-SD collides on 32207-3; method-duplicate channels are       -->
+    <!-- dropped; decorated -D codes route to LIS-190) and are NOT mapped here.  -->
+    <!-- UCUM (fL) is NOT seeded here — the bridge unit->UCUM model is out of    -->
+    <!-- scope for this changeset, exactly as in 049/052 (tracked separately).   -->
+    <!--                                                                    -->
+    <!-- Both changesets are idempotent (NOT EXISTS guards), have no context     -->
+    <!-- attribute (so they reach the integration-test harness, like 049/052),   -->
+    <!-- and each has an explicit, provably-scoped rollback.                     -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis192-001-insert-edan-pdw-test" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <columnExists schemaName="clinlims" tableName="test" columnName="loinc"/>
+        </preConditions>
+        <comment>Insert the EDAN PDW analyte (platelet distribution width) with LOINC 32207-3 (fL/EntVol form), reusing the WBC row's Hematology test_section when present. Guarded by NOT EXISTS loinc so it never competes with a catalog PDW (none exists on bench/prod; verified against the full test.loinc inventory + loinc.org) (LIS-192).</comment>
+        <sql>
+            INSERT INTO clinlims.test (id, name, description, loinc, is_active, is_reportable, orderable, test_section_id, guid, lastupdated)
+            SELECT nextval('clinlims.test_seq'), v.name, v.name, v.loinc, 'Y', 'Y', true,
+                   (SELECT t2.test_section_id FROM clinlims.test t2 WHERE t2.loinc = '6690-2' AND t2.test_section_id IS NOT NULL LIMIT 1),
+                   gen_random_uuid()::varchar, now()
+            FROM (VALUES
+                    ('PDW(Whole Blood)', '32207-3')
+                 ) AS v(name, loinc)
+            WHERE NOT EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
+        </sql>
+        <rollback>
+            <!-- Safe: LOINC 32207-3 does not pre-exist in any OE catalog (verified against the
+                 full test.loinc inventory + loinc.org), so scoping by loinc + the "(Whole Blood)"
+                 name this seed assigns deletes only the row this changeset created. -->
+            <sql>
+                DELETE FROM clinlims.test
+                    WHERE loinc = '32207-3'
+                    AND description LIKE '%(Whole Blood)';
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis192-002-map-edan-pdw-code" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'EDAN H99S'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the EDAN wire code 'PDW' (OBX-4, per the H90-series field-repurposing profile) to the OE Test carrying LOINC 32207-3, under the existing EDAN H99S analyzer, so attachTestCodeLoinc emits the PDW->32207-3 pair the bridge applies. Guarded so it maps only where the 32207-3 Test exists (created by changeset 1) and no PDW map row already exists (LIS-192).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, v.code,
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   now()
+            FROM clinlims.analyzer a
+            CROSS JOIN (VALUES
+                    ('PDW', '32207-3')
+                 ) AS v(code, loinc)
+            WHERE a.name = 'EDAN H99S'
+              AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+              AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_test_map m
+                    WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
+        </sql>
+        <rollback>
+            <!-- Delete only the 'PDW' map row this changeset creates, scoped to the EDAN H99S
+                 analyzer. This code did not pre-exist (verified: 0 PDW rows), so removing it is
+                 provably safe and touches no catalog config this seed did not create. -->
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                    WHERE analyzer_test_name = 'PDW'
+                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'EDAN H99S');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
