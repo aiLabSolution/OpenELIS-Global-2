@@ -172,12 +172,20 @@ if [ -f "$ROOT_VOLUME/properties/common.properties" ] && [ ! -f "$HARNESS_VOLUME
   sed 's/fhir\.openelis\.org/fhir/g' "$ROOT_VOLUME/properties/common.properties" > "$HARNESS_VOLUME/properties/common.properties"
   echo "  copied+adapted common.properties"
 fi
-# Ensure bridge URL is set for analyzer registration
+# Ensure bridge URL and credentials are set for analyzer registration
 if [ -f "$HARNESS_VOLUME/properties/common.properties" ] && ! grep -q "analyzer.bridge.url" "$HARNESS_VOLUME/properties/common.properties"; then
   echo "" >> "$HARNESS_VOLUME/properties/common.properties"
   echo "# Analyzer bridge URL for registration sync" >> "$HARNESS_VOLUME/properties/common.properties"
   echo "analyzer.bridge.url=https://bridge.openelis.org:8443" >> "$HARNESS_VOLUME/properties/common.properties"
   echo "  added analyzer.bridge.url to common.properties"
+fi
+if [ -f "$HARNESS_VOLUME/properties/common.properties" ] && ! grep -q "analyzer.bridge.username" "$HARNESS_VOLUME/properties/common.properties"; then
+  echo "analyzer.bridge.username=admin" >> "$HARNESS_VOLUME/properties/common.properties"
+  echo "  added analyzer.bridge.username to common.properties"
+fi
+if [ -f "$HARNESS_VOLUME/properties/common.properties" ] && ! grep -q "analyzer.bridge.password" "$HARNESS_VOLUME/properties/common.properties"; then
+  echo "analyzer.bridge.password=adminADMIN!" >> "$HARNESS_VOLUME/properties/common.properties"
+  echo "  added analyzer.bridge.password to common.properties"
 fi
 
 # hapi_application.yaml: adapt db.openelis.org -> db, fhir.openelis.org -> fhir
