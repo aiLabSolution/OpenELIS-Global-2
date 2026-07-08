@@ -572,6 +572,13 @@ public class StringUtil {
 
     // not truly significant digits, just decimal places
     public static String doubleWithSignificantDigits(double value, int significantDigits) {
+        // -1 means "raw value, no rounding" (mirrors the String overload above and the
+        // ResultServiceImpl display paths). Without this guard the format string
+        // becomes
+        // "%1$.-1f", which throws UnknownFormatConversionException.
+        if (significantDigits == -1) {
+            return String.valueOf(value);
+        }
         String format = "%1$." + significantDigits + "f";
         return String.format(format, value);
     }

@@ -141,4 +141,32 @@ public class StringUtilTest {
     public void countInstances_shouldCountOccurrences() {
         assertEquals(3, StringUtil.countInstances("hello world", 'l'));
     }
+
+    // doubleWithSignificantDigits: -1 means "raw value, no rounding" (LIS-188).
+    // The int overload previously lacked the -1 guard and threw
+    // UnknownFormatConversionException on the format string "%1$.-1f".
+    @Test
+    public void doubleWithSignificantDigits_int_minusOne_shouldReturnRawValue() {
+        assertEquals("45.7", StringUtil.doubleWithSignificantDigits(45.7, -1));
+    }
+
+    @Test
+    public void doubleWithSignificantDigits_int_zero_shouldRoundToWholeNumber() {
+        assertEquals("46", StringUtil.doubleWithSignificantDigits(45.7, 0));
+    }
+
+    @Test
+    public void doubleWithSignificantDigits_int_two_shouldFormatToTwoDecimals() {
+        assertEquals("45.70", StringUtil.doubleWithSignificantDigits(45.7, 2));
+    }
+
+    @Test
+    public void doubleWithSignificantDigits_string_minusOne_shouldReturnRawValue() {
+        assertEquals("45.7", StringUtil.doubleWithSignificantDigits(45.7, "-1"));
+    }
+
+    @Test
+    public void doubleWithSignificantDigits_string_two_shouldFormatToTwoDecimals() {
+        assertEquals("45.70", StringUtil.doubleWithSignificantDigits(45.7, "2"));
+    }
 }
