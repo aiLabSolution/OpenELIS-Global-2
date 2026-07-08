@@ -160,4 +160,7 @@
   <!-- LIS-183 (follows LIS-149): EDAN H90-series (H99S/H60S) CBC+DIFF LOINC seed: 13 new analyte Test rows + EDAN H99S analyzer + 30-code analyzer_test_map -->
   <include relativeToChangelogFile="true" file="052-edan-cbc-diff-loinc-seed.xml"/>
 
+  <!-- LIS-187 (follows LIS-183): EDAN H60S durable seed — analyzer row + CBC-6 analyzer_test_map (transport IPs stay operator config) -->
+  <include relativeToChangelogFile="true" file="053-edan-h60s-seed.xml"/>
+
 </databaseChangeLog>
