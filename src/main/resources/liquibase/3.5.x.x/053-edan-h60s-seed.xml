@@ -80,11 +80,15 @@
                     WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
         </sql>
         <rollback>
-            <sql>
-                DELETE FROM clinlims.analyzer_test_map
-                    WHERE analyzer_test_name IN ('WBC','RBC','HGB','HCT','MCV','PLT')
-                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'EDAN H60S');
-            </sql>
+            <!-- No-op by design (mirrors 052 cs3's catalog-code exclusion). All 6 codes
+                 (WBC/RBC/HGB/HCT/MCV/PLT) are catalog-reused: on the bench their
+                 analyzer_test_map rows pre-date this seed — cs2 runs as EXECUTED there but
+                 inserts 0 (NOT EXISTS guard) — and a rollback must never delete config it
+                 did not create. On a fresh DB cs2 does insert them, but cs1's rollback
+                 DELETEs the EDAN H60S analyzer and analyzer_test_map_analyzer_fk is ON
+                 DELETE CASCADE, so those rows are removed with the analyzer anyway. So this
+                 rollback intentionally does nothing (the safe direction: a re-apply is
+                 idempotent via NOT EXISTS). -->
         </rollback>
     </changeSet>
 
