@@ -55,6 +55,7 @@ import ESignatureButton, {
   SignatureMeaning,
 } from "../esignature/ESignatureButton";
 import AcceptUnconditionallyGuard from "./AcceptUnconditionallyGuard";
+import { applySignificantDigits } from "./resultPrecision";
 
 /**
  * Value for `labNumber` on /rest/LogbookResults. Strips only the legacy
@@ -1953,14 +1954,12 @@ export function SearchResults(props) {
       // return false;
     }
 
-    if (!isNaN(row.significantDigits)) {
-      const valueStr = actualValue.toString();
-      if (valueStr.includes(".")) {
-        const decimalPlaces = valueStr.split(".")[1].length;
-        if (decimalPlaces > row.significantDigits) {
-          actualValue = parseFloat(actualValue).toFixed(row.significantDigits);
-        }
-      }
+    const roundedValue = applySignificantDigits(
+      actualValue,
+      row.significantDigits,
+    );
+    if (roundedValue !== actualValue) {
+      actualValue = roundedValue;
       validation = {
         ...validation,
         newValue: greaterThanOrLessThan + actualValue,
