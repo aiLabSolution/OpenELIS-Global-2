@@ -166,4 +166,7 @@
   <!-- LIS-188 (follows the analyzer-map seeds): keep machine-sent numeric precision — set significant_digits = -1 (raw) for analyzer-mapped numeric test results -->
   <include relativeToChangelogFile="true" file="054-analyzer-results-raw-precision.xml"/>
 
+  <!-- LIS-192 (follows LIS-183): EDAN H99S PDW analyte LOINC seed — resolves the 052-deferred PDW to 32207-3 (fL) + maps wire code PDW under the existing EDAN H99S analyzer -->
+  <include relativeToChangelogFile="true" file="055-edan-pdw-loinc-seed.xml"/>
+
 </databaseChangeLog>
