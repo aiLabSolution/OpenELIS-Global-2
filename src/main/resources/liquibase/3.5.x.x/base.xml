@@ -163,4 +163,7 @@
   <!-- LIS-187 (follows LIS-183): EDAN H60S durable seed — analyzer row + CBC-6 analyzer_test_map (transport IPs stay operator config) -->
   <include relativeToChangelogFile="true" file="053-edan-h60s-seed.xml"/>
 
+  <!-- LIS-188 (follows the analyzer-map seeds): keep machine-sent numeric precision — set significant_digits = -1 (raw) for analyzer-mapped numeric test results -->
+  <include relativeToChangelogFile="true" file="054-analyzer-results-raw-precision.xml"/>
+
 </databaseChangeLog>
