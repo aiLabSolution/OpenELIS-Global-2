@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-187 (follows LIS-183/052) — EDAN H60S durable seed                -->
+    <!--                                                                    -->
+    <!-- The EDAN H99S got its durable OE seed in LIS-183 (052: analyzer +     -->
+    <!-- 30-code analyzer_test_map). The EDAN H60S row + its CBC-6 map were     -->
+    <!-- only ever created on the bench (no changeset) → they vanish on a       -->
+    <!-- fresh DB. This seeds the H60S analyzer + its CBC-6 map durably,        -->
+    <!-- mirroring the 052/049 pattern (idempotent, no context attr so it       -->
+    <!-- reaches the integration-test harness, explicit rollback).             -->
+    <!--                                                                    -->
+    <!-- Dual-analyzer coexistence: both EDAN units share one direct-ethernet   -->
+    <!-- link, swapped by hand (never simultaneous). The bridge routes inbound  -->
+    <!-- by connection SOURCE IP and its startup pull keys registry entries by  -->
+    <!-- ipAddress only (AnalyzerRegistryBootstrap; identifierPattern is        -->
+    <!-- corroboration, not a selector), so the two analyzers need DISTINCT     -->
+    <!-- IPs. Transport IPs are NOT seeded here — they are OPERATOR CONFIG,     -->
+    <!-- set in the OE Analyzer admin screen (H99S=192.168.50.50,               -->
+    <!-- H60S=192.168.50.51), durable in the DB and pulled by the bridge on     -->
+    <!-- restart. The runbook documents this coexistence step.                 -->
+    <!--                                                                    -->
+    <!-- The H60S map is the CBC-6 subset (reuses the LabSolution hematology    -->
+    <!-- catalog, same dependency as 049/052). Extending it to the full 3-part  -->
+    <!-- differential is a follow-up (its own LOINC-verification pass).         -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis187-001-seed-edan-h60s-analyzer" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer"/>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'EDAN H60S'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Seed the EDAN H60S analyzer (SETUP status, HL7 v2.3.1; transport configured by the operator at deploy). fhir_uuid set explicitly to satisfy the NOT NULL + UNIQUE fhir_uuid constraint 004 adds, mirroring 052.</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer (id, name, description, is_active, status, protocol_version, analyzer_type, fhir_uuid, last_updated)
+            VALUES (nextval('clinlims.analyzer_seq'), 'EDAN H60S', 'EDAN H90-series hematology analyzer (H60S), HL7 MLLP', true, 'SETUP', 'HL7_V2_3_1', 'HEMATOLOGY', gen_random_uuid(), now());
+        </sql>
+        <rollback>
+            <sql>DELETE FROM clinlims.analyzer WHERE name = 'EDAN H60S';</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis187-002-map-edan-h60s-cbc6" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'EDAN H60S'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the EDAN H60S CBC-6 wire codes (WBC/RBC/HGB/HCT/MCV/PLT) to the OE Test carrying each LOINC — reuses the LabSolution hematology catalog (same catalog dependency as 049/052), mapping only where the LOINC-bearing Test exists. H60S full 3-part-diff map extension is out of scope here (follow-up).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, v.code,
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   now()
+            FROM clinlims.analyzer a
+            CROSS JOIN (VALUES
+                    ('WBC', '6690-2'),
+                    ('RBC', '789-8'),
+                    ('HGB', '718-7'),
+                    ('HCT', '4544-3'),
+                    ('MCV', '787-2'),
+                    ('PLT', '777-3')
+                 ) AS v(code, loinc)
+            WHERE a.name = 'EDAN H60S'
+              AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+              AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_test_map m
+                    WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                    WHERE analyzer_test_name IN ('WBC','RBC','HGB','HCT','MCV','PLT')
+                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'EDAN H60S');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
