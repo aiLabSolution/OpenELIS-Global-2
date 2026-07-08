@@ -149,6 +149,9 @@ public class ResultServiceImpl extends AuditableBaseObjectServiceImpl<Result, St
             return getDictEntry(result);
         } else if (TypeOfTestResultServiceImpl.ResultType.NUMERIC.matches(getTestType(result))) {
             int significantPlaces = result.getSignificantDigits();
+            if (significantPlaces == -1) {
+                return result.getValue();
+            }
             if (significantPlaces == 0) {
                 return result.getValue().split("\\.")[0];
             }
