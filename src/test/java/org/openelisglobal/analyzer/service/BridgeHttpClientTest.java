@@ -43,8 +43,7 @@ public class BridgeHttpClientTest {
         BridgeHttpClient client = new BridgeHttpClient();
         inject(client, "bridgeUsername", "admin");
         inject(client, "bridgePassword", "adminADMIN!");
-        String credential = Base64.getEncoder()
-                .encodeToString("admin:adminADMIN!".getBytes(StandardCharsets.UTF_8));
+        String credential = Base64.getEncoder().encodeToString("admin:adminADMIN!".getBytes(StandardCharsets.UTF_8));
 
         client.get(baseUrl() + "/api/analyzers", Duration.ofSeconds(5));
 

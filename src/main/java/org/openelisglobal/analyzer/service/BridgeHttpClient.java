@@ -131,8 +131,7 @@ public class BridgeHttpClient {
     }
 
     private void applyBasicAuth(HttpRequest.Builder builder) {
-        if (bridgeUsername == null || bridgeUsername.isBlank()
-                || bridgePassword == null || bridgePassword.isBlank()) {
+        if (bridgeUsername == null || bridgeUsername.isBlank() || bridgePassword == null || bridgePassword.isBlank()) {
             return;
         }
         String credential = bridgeUsername + ":" + bridgePassword;
