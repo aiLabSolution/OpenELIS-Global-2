@@ -24,7 +24,8 @@
     <!-- ResultServiceImpl's display formatters treat the same field the same.  -->
     <!--                                                                    -->
     <!-- Fix: set significant_digits = -1 (raw) for every NUMERIC test result   -->
-    <!-- of a test mapped to an analyzer (test_id in analyzer_test_map). The    -->
+    <!-- and its primary numeric component for tests mapped to an analyzer       -->
+    <!-- (test_id in analyzer_test_map). The                                    -->
     <!-- affected rows are OpenELIS demo-seed tests (GPT/GOT/Glucose/Creatinine -->
     <!-- /Amylase/cholesterol/... and the EDAN CBC % / Abs tests) linked to the -->
     <!-- Seamaty SD1 / EDAN analyzers by seeds 049/050/052/053. Because this    -->
@@ -41,10 +42,11 @@
         <preConditions onFail="MARK_RAN">
             <and>
                 <tableExists schemaName="clinlims" tableName="test_result"/>
+                <tableExists schemaName="clinlims" tableName="test_result_component"/>
                 <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
             </and>
         </preConditions>
-        <comment>Set significant_digits = -1 (raw, no rounding) for numeric test results of analyzer-mapped tests, so accepted analyzer results keep the precision the instrument sent. Idempotent: the IS DISTINCT FROM -1 guard makes a re-apply a no-op.</comment>
+        <comment>Set significant_digits = -1 (raw, no rounding) for numeric test results and their primary numeric components on analyzer-mapped tests, so accepted analyzer results keep the precision the instrument sent. Idempotent: the IS DISTINCT FROM -1 guards make a re-apply a no-op.</comment>
         <sql>
             UPDATE clinlims.test_result
             SET significant_digits = -1
@@ -54,6 +56,17 @@
                     SELECT DISTINCT test_id
                     FROM clinlims.analyzer_test_map
                     WHERE test_id IS NOT NULL);
+
+            UPDATE clinlims.test_result_component
+            SET significant_digits = -1
+            WHERE result_type = 'N'
+              AND significant_digits IS DISTINCT FROM -1
+              AND test_id IN (
+                    SELECT DISTINCT tr.test_id
+                    FROM clinlims.test_result tr
+                    JOIN clinlims.analyzer_test_map m ON m.test_id = tr.test_id
+                    WHERE tr.tst_rslt_type = 'N'
+                      AND m.test_id IS NOT NULL);
         </sql>
         <rollback>
             <!-- No-op by design (the safe direction, mirroring 053 cs2's philosophy).

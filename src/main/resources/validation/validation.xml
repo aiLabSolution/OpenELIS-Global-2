@@ -2292,7 +2292,7 @@
                 <arg0 key="testresult.significantDigits" />
                 <var>
                     <var-name>mask</var-name>
-                    <var-value>^[0-9]*$</var-value>
+                    <var-value>^$|^-1$|^[0-9]$|^10$</var-value>
                 </var>
                 <arg1 name="maxlength" key="${var:maxlength}" resource="false" />
                 <var>

@@ -1514,7 +1514,7 @@ td {
             <tr id="endRow"></tr>
         </table>
         <label for="significantDigits"><spring:message code="label.significant.digits" /></label>
-        <input type="number" min="0" max="10" id="significantDigits">
+        <input type="number" min="-1" max="10" id="significantDigits">
     </div>
 
 

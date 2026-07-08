@@ -100,9 +100,8 @@ public class TestModifyEntryFormValidator implements Validator {
                     ValidationHelper.validateField(StringUtil.nullSafeToString(newTest.get("highValid")), "JsonWad",
                             "highValid", errors, false, 255, ValidationHelper.FLOAT_REGEX);
 
-                    ValidationHelper.validateFieldAndCharset(
-                            StringUtil.nullSafeToString(newTest.get("significantDigits")), "JsonWad",
-                            "Significant digits", errors, false, 2, "0-9");
+                    ValidationHelper.validateField(StringUtil.nullSafeToString(newTest.get("significantDigits")),
+                            "JsonWad", "Significant digits", errors, false, 2, "^$|^-1$|^[0-9]$|^10$");
 
                     JSONArray resultLimits = JSONUtils.getAsArray(newTest.get("resultLimits"));
                     for (int i = 0; i < resultLimits.size(); ++i) {
