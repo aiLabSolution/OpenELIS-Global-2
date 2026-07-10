@@ -7,10 +7,13 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
+import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
@@ -202,5 +205,49 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
 
         assertThrows("hydration must restore readOnly from the DB, still blocking accept",
                 UnresolvedCorrectionException.class, () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
+    }
+
+    @Test
+    public void useCorrection_marksBothStagingRowsForDeletionAndKeepsPartnerReportable() {
+        AnalyzerResultItem original = originalItem(true, false, false);
+        AnalyzerResultItem correction = correctionItem();
+        correction.setCorrectionAction("USE");
+
+        List<AnalyzerResultItem> items = List.of(original, correction);
+        acceptService.hydrateStagingFlags(items);
+        acceptService.resolveLinkedCorrections(items);
+
+        // the substituted partner stays editable, so buildSampleGroupings persists it
+        // (its !isReadOnly() guard keeps readOnly rows out) — carrying the 7.1 value
+        assertEquals("7.1", original.getResult());
+        assertTrue("partner must remain reportable (non-readOnly) so it persists", !original.isReadOnly());
+        assertTrue("the correction row stays readOnly — never a second reportable row", correction.isReadOnly());
+
+        // both staging rows must be removed: no orphaned correction, no stale original
+        List<AnalyzerResults> removable = acceptService.getRemovableAnalyzerResults(items, new ArrayList<>());
+        Set<String> removedIds = removable.stream().map(AnalyzerResults::getId).collect(Collectors.toSet());
+        assertTrue("original staging row 1010 must be deleted", removedIds.contains("1010"));
+        assertTrue("correction staging row 1011 must be deleted", removedIds.contains("1011"));
+    }
+
+    @Test
+    public void useCorrection_sharedTestName_substitutesOntoCorrectRow() {
+        // H99S shared-name config: two analyzer test names map to one OE testId (4001)
+        // in one accession. A correction for the second name must land on the second
+        // original, not the first testId-4001 row — pairing is by testName, not testId.
+        AnalyzerResultItem originalA = buildItem("2010", "1.0", false, null, "4001", "CORR200", "K-A", 1, true, false,
+                false);
+        AnalyzerResultItem originalB = buildItem("2011", "2.0", false, "2012", "4001", "CORR200", "K-B", 1, true, false,
+                false);
+        AnalyzerResultItem correctionB = buildItem("2012", "9.9", true, "2011", "4001", "CORR200", "K-B", 1, false,
+                false, false);
+        correctionB.setCorrectionAction("USE");
+
+        List<AnalyzerResultItem> items = List.of(originalA, originalB, correctionB);
+        // resolve directly on the beans: readOnly is set explicitly, no DB row needed
+        acceptService.resolveLinkedCorrections(items);
+
+        assertEquals("correction must land on the same-named original", "9.9", originalB.getResult());
+        assertEquals("the other testId-4001 row must be untouched", "1.0", originalA.getResult());
     }
 }

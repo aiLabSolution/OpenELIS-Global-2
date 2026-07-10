@@ -245,6 +245,10 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             // mirror the controller GET-time rule (AnalyzerResultsController line 401)
             item.setReadOnly(entity.isReadOnly() || entity.getTestId() == null);
             item.setDuplicateAnalyzerResultId(entity.getDuplicateAnalyzerResultId());
+            // isControl is also trust-sensitive: a posted isControl=true would let a
+            // correction skip resolveLinkedCorrections entirely (it is excluded there),
+            // reopening the silent-drop path — so it too must come from the DB.
+            item.setIsControl(entity.getIsControl());
         }
     }
 
@@ -267,7 +271,11 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
 
         for (List<AnalyzerResultItem> group : groupedByNumber.values()) {
             GroupAction groupAction = resolveGroupAction(group);
-            Set<String> useAppliedTestIds = new HashSet<>();
+            // Tracks partners already substituted this group (identity, not testId):
+            // two corrections for one testId but distinct test names are legitimately
+            // distinct rows (H99S shared-name), while two USEs onto the same partner
+            // are ambiguous and must block.
+            Set<AnalyzerResultItem> usedPartners = new HashSet<>();
 
             for (AnalyzerResultItem item : group) {
                 if (item.getIsControl() || !isLinkedCorrection(item)) {
@@ -300,8 +308,8 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
                         // orphan correction — its own group header, the original is gone
                         appendAutoNote(item, "note.analyzer.correction.applied.orphan", item.getResult());
                         item.setReadOnly(false);
-                    } else if (!useAppliedTestIds.add(item.getTestId())) {
-                        // multiple corrections both USE for the same test is ambiguous
+                    } else if (!usedPartners.add(partner)) {
+                        // two corrections both USE onto the same original is ambiguous
                         unresolved.add(item.getAccessionNumber() + " : " + item.getTestName());
                     } else {
                         appendAutoNote(partner, "note.analyzer.correction.applied", partner.getResult(),
@@ -334,15 +342,25 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
 
     /**
      * The partner of a correction is the editable (non-readOnly) item in the same
-     * group for the same test. Pairing is by (group, testId, !readOnly) rather than
-     * by the backlink id because a chained correction repoints the link.
+     * group for the same analyzer test <em>name</em>. Pairing is by (group,
+     * testName, !readOnly): testName is the dedup key
+     * (AnalyzerResultsDAOImpl.getDuplicateResultByAccessionAndTest), so it is what
+     * actually links a correction to its original — and unlike testId it stays
+     * distinct when two analyzer test names map to one OE test in the same
+     * accession (the H99S shared-name configuration), where testId pairing would
+     * substitute onto the wrong row. It is not the backlink id because a chained
+     * correction repoints the link between the readOnly rows rather than to the
+     * editable original.
      */
     private AnalyzerResultItem findPartner(List<AnalyzerResultItem> group, AnalyzerResultItem correction) {
+        if (GenericValidator.isBlankOrNull(correction.getTestName())) {
+            return null;
+        }
         for (AnalyzerResultItem candidate : group) {
             if (candidate == correction || candidate.isReadOnly()) {
                 continue;
             }
-            if (candidate.getTestId() != null && candidate.getTestId().equals(correction.getTestId())) {
+            if (correction.getTestName().equals(candidate.getTestName())) {
                 return candidate;
             }
         }
