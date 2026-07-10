@@ -347,7 +347,41 @@ const AnalyserResults = (props) => {
           </>
         );
 
-      case "result":
+      case "result": {
+        // A linked correction is a read-only row created when the analyzer
+        // re-sent a corrected value for an already-staged result. The tech
+        // must explicitly choose to USE or DISMISS it before accept is
+        // allowed (the backend fail-closed blocks accept until every linked
+        // correction carries a correctionAction).
+        const isLinkedCorrection =
+          row.readOnly && row.duplicateAnalyzerResultId;
+        const correctionPicker = isLinkedCorrection && (
+          <Select
+            id={"resultList" + row.id + ".correctionAction"}
+            name={"resultList[?(@.id == " + row.id + ")].correctionAction"}
+            labelText={intl.formatMessage({
+              id: "analyzer.correction.resolve.label",
+            })}
+            defaultValue=""
+            size="sm"
+            onChange={(e) => handleChange(e, row.id)}
+          >
+            <SelectItem
+              value=""
+              text={intl.formatMessage({
+                id: "analyzer.correction.resolve.placeholder",
+              })}
+            />
+            <SelectItem
+              value="USE"
+              text={intl.formatMessage({ id: "analyzer.correction.use" })}
+            />
+            <SelectItem
+              value="DISMISS"
+              text={intl.formatMessage({ id: "analyzer.correction.dismiss" })}
+            />
+          </Select>
+        );
         switch (row.resultType) {
           case "M":
           case "C":
@@ -359,11 +393,17 @@ const AnalyserResults = (props) => {
                     (result) => result.id == row.result,
                   )?.value
                 }
+                {correctionPicker}
               </>
             );
           default:
             if (row.readOnly) {
-              return row.result;
+              return (
+                <>
+                  {row.result}
+                  {correctionPicker}
+                </>
+              );
             } else {
               return (
                 <>
@@ -383,6 +423,7 @@ const AnalyserResults = (props) => {
               );
             }
         }
+      }
 
       default:
     }

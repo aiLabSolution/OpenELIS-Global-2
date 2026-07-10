@@ -1,0 +1,43 @@
+<dataset>
+    <!-- LIS-158: linked-correction accept/resolve fixtures. Test 4001 and
+         analyzer 2001 are copied verbatim from analyzer-results.xml so the
+         analyzer_results FKs resolve. -->
+    <test id="4001" description="Blood Test" loinc="123456"
+        reporting_description="Complete Blood Count" sticker_req_flag="Y"
+        is_active="Y" active_begin="2025-01-01 12:00:00"
+        active_end="2025-12-31 12:00:00" is_reportable="N" time_holding="30"
+        time_wait="15" time_ta_average="60" time_ta_warning="90"
+        time_ta_max="120" label_qty="1" lastupdated="2025-03-20 12:00:00"
+        local_code="CBC" sort_order="2147483646" name="Complete Blood Count"
+        orderable="true" guid="abc-123" antimicrobial_resistance="true" />
+
+    <analyzer id="2001" name="Cobas 6800"
+        machine_id="COBAS6800-001" analyzer_type="MOLECULAR"
+        description="Automated molecular analyzer for PCR testing"
+        location="Main Laboratory - Room 101" is_active="true"
+        has_setup_page="true" last_updated="2023-01-01 12:00:00" />
+
+    <!-- id=1010: editable original (K+ 4.1) -->
+    <analyzer_results id="1010" analyzer_id="2001"
+        accession_number="CORR100" test_name="Potassium" result="4.1"
+        units="mmol/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
+        read_only="false" duplicate_id="1011" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N"
+        test_id="4001" />
+
+    <!-- id=1011: analyzer-sent correction (K+ 7.1), linked back to 1010 -->
+    <analyzer_results id="1011" analyzer_id="2001"
+        accession_number="CORR100" test_name="Potassium" result="7.1"
+        units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
+        read_only="true" duplicate_id="1010" positive="false"
+        complete_date="2025-07-02 08:00:00" test_result_type="N"
+        test_id="4001" />
+
+    <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id) —
+         must never be treated as a linked correction / must never block accept -->
+    <analyzer_results id="1012" analyzer_id="2001"
+        accession_number="MISS200" test_name="Unmapped" result="99"
+        units="" iscontrol="false" last_updated="2025-07-01 08:00:00"
+        read_only="true" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N" />
+</dataset>

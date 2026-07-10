@@ -22,6 +22,7 @@ import org.openelisglobal.analyzerresults.action.AnalyzerResultsPaging;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsAcceptService;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsService;
+import org.openelisglobal.analyzerresults.service.UnresolvedCorrectionException;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.openelisglobal.common.controller.BaseController;
 import org.openelisglobal.common.exception.LIMSRuntimeException;
@@ -85,7 +86,7 @@ public class AnalyzerResultsController extends BaseController {
             "resultList*.sampleGroupingNumber", "resultList*.readOnly", "resultList*.testResultType",
             "resultList*.testId", "resultList*.accessionNumber", "resultList*.isAccepted", "resultList*.isRejected",
             "resultList*.isDeleted", "resultList*.result", "resultList*.completeDate", "resultList*.note",
-            "resultList*.reflexSelectionId", };
+            "resultList*.reflexSelectionId", "resultList*.correctionAction", };
 
     private static final boolean IS_RETROCI = ConfigurationProperties.getInstance()
             .isPropertyValueEqual(ConfigurationProperties.Property.configurationName, "CI_GENERAL");
@@ -399,6 +400,7 @@ public class AnalyzerResultsController extends BaseController {
         resultItem.setCompleteDate(result.getCompleteDateForDisplay());
         resultItem.setLastUpdated(result.getLastupdated());
         resultItem.setReadOnly((result.isReadOnly() || result.getTestId() == null));
+        resultItem.setDuplicateAnalyzerResultId(result.getDuplicateAnalyzerResultId());
         resultItem.setResult(getResultForItem(result));
         resultItem.setSignificantDigits(getSignificantDigitsFromAnalyzerResults(result));
         resultItem.setTestResultType(result.getResultType());
@@ -756,6 +758,10 @@ public class AnalyzerResultsController extends BaseController {
             }
             acceptService.acceptAndPersist(resultItemList, getSysUserId(request));
 
+        } catch (UnresolvedCorrectionException e) {
+            LogEvent.logWarn(this.getClass().getSimpleName(), "showRestAnalyzerResultsSave", e.getMessage());
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            writeErrorResponse(response, e.getMessage());
         } catch (LIMSRuntimeException e) {
             LogEvent.logError(e.getMessage(), e);
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);

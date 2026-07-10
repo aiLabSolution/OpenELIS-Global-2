@@ -4,6 +4,7 @@ import java.sql.Date;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -107,6 +108,9 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         if (actionableResults.isEmpty()) {
             return;
         }
+
+        hydrateStagingFlags(actionableResults);
+        resolveLinkedCorrections(actionableResults);
 
         // Remove actionable items from the remaining list so we can detect
         // childless controls among the leftovers.
@@ -216,6 +220,173 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         List<AnalyzerResults> resultList = new ArrayList<>();
         resultList.addAll(deletableAnalyzerResults);
         return resultList;
+    }
+
+    // ---------------------------------------------------------------
+    // Linked-correction resolution (LIS-158)
+    // ---------------------------------------------------------------
+
+    /**
+     * Re-reads the persisted staging row for every actionable item and overwrites
+     * the trust-sensitive {@code readOnly} / {@code duplicateAnalyzerResultId}
+     * flags from the database. The REST accept path replaces cached items wholesale
+     * from the client POST ({@code AnalyzerResultsPaging.updateCache}), so a posted
+     * item cannot be trusted to still reflect the staging row it was rendered from
+     * — a tampered or stale post must not be able to turn a linked correction into
+     * an ordinary editable row.
+     */
+    void hydrateStagingFlags(List<AnalyzerResultItem> items) {
+        for (AnalyzerResultItem item : items) {
+            AnalyzerResults entity = analyzerResultsService.readAnalyzerResults(item.getId());
+            if (entity == null) {
+                throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.staging.stale",
+                        new String[] { item.getAccessionNumber() }));
+            }
+            // mirror the controller GET-time rule (AnalyzerResultsController line 401)
+            item.setReadOnly(entity.isReadOnly() || entity.getTestId() == null);
+            item.setDuplicateAnalyzerResultId(entity.getDuplicateAnalyzerResultId());
+        }
+    }
+
+    /**
+     * Applies the technician's explicit USE/DISMISS decision for every linked
+     * correction (a readOnly item with a {@code duplicateAnalyzerResultId}
+     * backlink) in an accepted sample grouping, and fails closed — throwing
+     * {@link UnresolvedCorrectionException} — if any accepted grouping still has a
+     * linked correction without a decision. Rejected/deleted groupings are never
+     * blocked: a correction that is rejected or deleted along with its group is
+     * audit-trailed, not silently reported.
+     */
+    void resolveLinkedCorrections(List<AnalyzerResultItem> items) {
+        Map<Integer, List<AnalyzerResultItem>> groupedByNumber = new LinkedHashMap<>();
+        for (AnalyzerResultItem item : items) {
+            groupedByNumber.computeIfAbsent(item.getSampleGroupingNumber(), k -> new ArrayList<>()).add(item);
+        }
+
+        List<String> unresolved = new ArrayList<>();
+
+        for (List<AnalyzerResultItem> group : groupedByNumber.values()) {
+            GroupAction groupAction = resolveGroupAction(group);
+            Set<String> useAppliedTestIds = new HashSet<>();
+
+            for (AnalyzerResultItem item : group) {
+                if (item.getIsControl() || !isLinkedCorrection(item)) {
+                    continue;
+                }
+
+                if (groupAction == GroupAction.DELETE) {
+                    // deletions are audit-trailed; nothing is reported either way
+                    continue;
+                }
+
+                if (groupAction == GroupAction.REJECT) {
+                    AnalyzerResultItem partner = findPartner(group, item);
+                    if (partner != null) {
+                        appendAutoNote(partner, "note.analyzer.correction.discardedOnReject", item.getResult());
+                    }
+                    continue;
+                }
+
+                // ACCEPT
+                String action = item.getCorrectionAction();
+                if ("USE".equals(action)) {
+                    if (GenericValidator.isBlankOrNull(item.getTestId())) {
+                        // cannot USE a correction that never resolved to a mapped test
+                        unresolved.add(item.getAccessionNumber() + " : " + item.getTestName());
+                        continue;
+                    }
+                    AnalyzerResultItem partner = findPartner(group, item);
+                    if (partner == null) {
+                        // orphan correction — its own group header, the original is gone
+                        appendAutoNote(item, "note.analyzer.correction.applied.orphan", item.getResult());
+                        item.setReadOnly(false);
+                    } else if (!useAppliedTestIds.add(item.getTestId())) {
+                        // multiple corrections both USE for the same test is ambiguous
+                        unresolved.add(item.getAccessionNumber() + " : " + item.getTestName());
+                    } else {
+                        appendAutoNote(partner, "note.analyzer.correction.applied", partner.getResult(),
+                                item.getResult());
+                        partner.setResult(item.getResult());
+                        partner.setCompleteDate(item.getCompleteDate());
+                    }
+                } else if ("DISMISS".equals(action)) {
+                    AnalyzerResultItem partner = findPartner(group, item);
+                    if (partner != null) {
+                        appendAutoNote(partner, "note.analyzer.correction.dismissed", item.getResult(),
+                                partner.getResult());
+                    }
+                    // no partner: the row is just deleted, the audit trail covers it
+                } else {
+                    unresolved.add(item.getAccessionNumber() + " : " + item.getTestName());
+                }
+            }
+        }
+
+        if (!unresolved.isEmpty()) {
+            throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.correction.unresolved",
+                    new String[] { String.join("; ", unresolved) }));
+        }
+    }
+
+    private boolean isLinkedCorrection(AnalyzerResultItem item) {
+        return item.isReadOnly() && !GenericValidator.isBlankOrNull(item.getDuplicateAnalyzerResultId());
+    }
+
+    /**
+     * The partner of a correction is the editable (non-readOnly) item in the same
+     * group for the same test. Pairing is by (group, testId, !readOnly) rather than
+     * by the backlink id because a chained correction repoints the link.
+     */
+    private AnalyzerResultItem findPartner(List<AnalyzerResultItem> group, AnalyzerResultItem correction) {
+        for (AnalyzerResultItem candidate : group) {
+            if (candidate == correction || candidate.isReadOnly()) {
+                continue;
+            }
+            if (candidate.getTestId() != null && candidate.getTestId().equals(correction.getTestId())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private enum GroupAction {
+        ACCEPT, REJECT, DELETE
+    }
+
+    /**
+     * extractActionableResult already propagated identical accept/reject/delete
+     * flags across every member of a group, so any member reflects the group's
+     * action — prefer a non-readOnly member since a linked correction's own flags
+     * are the ones under scrutiny here.
+     */
+    private GroupAction resolveGroupAction(List<AnalyzerResultItem> group) {
+        AnalyzerResultItem representative = null;
+        for (AnalyzerResultItem item : group) {
+            if (!item.isReadOnly()) {
+                representative = item;
+                break;
+            }
+        }
+        if (representative == null) {
+            representative = group.get(0);
+        }
+
+        if (representative.getIsDeleted()) {
+            return GroupAction.DELETE;
+        }
+        if (representative.getIsRejected()) {
+            return GroupAction.REJECT;
+        }
+        return GroupAction.ACCEPT;
+    }
+
+    private void appendAutoNote(AnalyzerResultItem item, String messageKey, String... args) {
+        String auto = MessageUtil.getMessage(messageKey, args);
+        if (GenericValidator.isBlankOrNull(item.getNote())) {
+            item.setNote(auto);
+        } else {
+            item.setNote(item.getNote() + "\n" + auto);
+        }
     }
 
     // ---------------------------------------------------------------
