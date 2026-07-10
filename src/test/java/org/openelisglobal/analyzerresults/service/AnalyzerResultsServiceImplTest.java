@@ -172,6 +172,42 @@ public class AnalyzerResultsServiceImplTest {
         assertEquals("42", incoming.getDuplicateAnalyzerResultId());
     }
 
+    // ------------------------------------------------------------------
+    // LIS-127 — cross-patient safety under a shared sentinel accession.
+    // Same defect as LIS-121 (filed twice from the 2026-07-03 review); this
+    // anchors the specific walk-up scenario LIS-127 names: two DIFFERENT
+    // patients whose results collapse onto the constant "HL7-UNKNOWN"
+    // accession (HL7AnalyzerLineInserter derives it when patient+order IDs
+    // are blank). Patient B's identical value must never be discarded as an
+    // "idempotent re-import" of patient A's — it must stage, linked, so a
+    // tech sees both. The two walk-up runs carry distinct completeDate
+    // stamps (each import is timestamped separately); asserting on injected
+    // timestamps keeps this deterministic. A same-millisecond collision is
+    // the residual, structurally-unfixable window (the key has no patient
+    // dimension) — tracked separately, not exercised here.
+    // ------------------------------------------------------------------
+    @Test
+    public void twoPatientsSharingSentinelAccession_sameValue_bothStage_neitherDropped() {
+        String sentinel = "HL7-UNKNOWN";
+        AnalyzerResults patientA = existingRow("patient-A-row", "4.0", new Timestamp(1_700_000_000_000L));
+        patientA.setAccessionNumber(sentinel);
+        AnalyzerResults patientB = newIncoming("4.0", new Timestamp(1_700_000_300_000L)); // same value, later run
+        patientB.setAccessionNumber(sentinel);
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(patientB)).thenReturn(List.of(patientA));
+
+        service.insertAnalyzerResults(List.of(patientB), USER_ID);
+
+        // Patient B's row is staged, not silently dropped…
+        verify(baseObjectDAO, times(1)).insert(patientB);
+        // …linked to patient A's row so a tech sees both and can disambiguate…
+        assertEquals("patient B must back-link to A's staged row, not overwrite it", "patient-A-row",
+                patientB.getDuplicateAnalyzerResultId());
+        assertTrue("linked correction is flagged for review", patientB.isReadOnly());
+        // …and A is updated to point forward at B, so both rows stay reviewable.
+        verify(baseObjectDAO, times(1)).update(patientA);
+        assertEquals("new-id-777", patientA.getDuplicateAnalyzerResultId());
+    }
+
     @Test
     public void reImport_bothNullDates_sameValue_skipsAsTrueReImport() {
         // Timestamp-less analyzers: null completeDate on both sides + equal value
