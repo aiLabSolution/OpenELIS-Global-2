@@ -176,6 +176,16 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
                     if (duplicateByAccessionAndTestOnly) {
                         update(previousResult);
                     }
+                } else {
+                    // True re-import (same accession+test key, same completeDate AND
+                    // same value) — an idempotent re-POST of a message already staged.
+                    // Skipping is by design, but trace it so the skip is not
+                    // structurally invisible (LIS-127): a dropped row that never
+                    // reaches the accept worklist should still leave a diagnostic
+                    // breadcrumb.
+                    LogEvent.logDebug(this.getClass().getSimpleName(), "insertAnalyzerResults",
+                            "skipped idempotent re-import: analyzerId=" + result.getAnalyzerId() + " accession="
+                                    + result.getAccessionNumber() + " test=" + result.getTestName());
                 }
             }
 
