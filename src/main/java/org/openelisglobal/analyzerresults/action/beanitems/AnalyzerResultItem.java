@@ -76,6 +76,12 @@ public class AnalyzerResultItem implements Serializable {
 
     private boolean readOnly = false;
 
+    // Transient: technician's explicit disposition of a linked correction row
+    // ("USE" | "DISMISS"). Not persisted — consumed by
+    // AnalyzerResultsAcceptServiceImpl.resolveLinkedCorrections and validated
+    // there, not here.
+    private String correctionAction;
+
     @SafeHtml(level = SafeHtml.SafeListLevel.NONE, groups = { AnalyzerResultsForm.AnalyzerResuts.class })
     private String testResultType = "N";
 
@@ -296,6 +302,14 @@ public class AnalyzerResultItem implements Serializable {
 
     public boolean isReadOnly() {
         return readOnly;
+    }
+
+    public void setCorrectionAction(String correctionAction) {
+        this.correctionAction = correctionAction;
+    }
+
+    public String getCorrectionAction() {
+        return correctionAction;
     }
 
     public void setTestResultType(String testResultType) {

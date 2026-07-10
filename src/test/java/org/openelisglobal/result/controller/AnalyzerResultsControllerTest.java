@@ -22,4 +22,13 @@ public class AnalyzerResultsControllerTest extends BaseWebContextSensitiveTest {
                 .andExpect(jsonPath("$.resultList").isArray())
                 .andExpect(jsonPath("$.resultList[0].accessionNumber").value("ACC123456"));
     }
+
+    // LIS-158: the correction picker keys off row.duplicateAnalyzerResultId, so the
+    // GET JSON must actually carry it (analyzerResultsToAnalyzerResultItem maps
+    // it).
+    @Test
+    public void showRestAnalyzerResults_ShouldExposeDuplicateAnalyzerResultId() throws Exception {
+        mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultList[0].duplicateAnalyzerResultId").value("1001"));
+    }
 }
