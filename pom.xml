@@ -125,32 +125,29 @@
         </dependency>
         <dependency>
             <!-- FHIR R4 instance validation ($validate) — LIS-41 / S4.1 conformance
-                test. FhirInstanceValidator + DefaultProfileValidationSupport; the base R4
-                StructureDefinitions ship in org.hl7.fhir.r4. Test scope: this slice asserts
-                the produced resources are $validate-clean; no runtime $validate operation
-                is exposed yet. -->
+                test and the LIS-42 / S4.2 runtime gate. FhirInstanceValidator +
+                DefaultProfileValidationSupport; the base R4 StructureDefinitions ship
+                in org.hl7.fhir.r4. Runtime scope: inbound ServiceRequests are validated
+                before mapping/persisting (FhirConfig.fhirValidator). -->
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-validation</artifactId>
             <version>8.10.0</version>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <!-- Base R4 conformance resources (profiles-resources.xml etc.) that
                 DefaultProfileValidationSupport reads to recognise/validate resources. They
                 are NOT bundled in org.hl7.fhir.r4; without this the validator reports a
-                fatal "unknown resource name 'Observation'". Test scope. -->
+                fatal "unknown resource name 'Observation'". -->
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-validation-resources-r4</artifactId>
             <version>8.10.0</version>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <!-- Cache SPI required at runtime by hapi-fhir-validation's worker context
-                (HAPI-2200 without it). Test scope: only the conformance test needs it. -->
+                (HAPI-2200 without it). -->
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-caching-caffeine</artifactId>
             <version>8.10.0</version>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

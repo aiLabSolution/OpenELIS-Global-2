@@ -3,16 +3,22 @@ package org.openelisglobal.dataexchange.fhir;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.FhirVersionEnum;
+import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
 import ca.uhn.fhir.rest.client.apache.ApacheRestfulClientFactory;
 import ca.uhn.fhir.rest.client.api.IClientInterceptor;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.api.IRestfulClientFactory;
 import ca.uhn.fhir.rest.client.interceptor.BasicAuthInterceptor;
+import ca.uhn.fhir.validation.FhirValidator;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
 import org.apache.commons.validator.GenericValidator;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.hl7.fhir.common.hapi.validation.support.CommonCodeSystemsTerminologyService;
+import org.hl7.fhir.common.hapi.validation.support.InMemoryTerminologyServerValidationSupport;
+import org.hl7.fhir.common.hapi.validation.support.ValidationSupportChain;
+import org.hl7.fhir.common.hapi.validation.validator.FhirInstanceValidator;
 import org.hl7.fhir.instance.model.api.IBaseBundle;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Bundle.BundleEntryComponent;
@@ -69,6 +75,24 @@ public class FhirConfig {
         FhirContext fhirContext = new FhirContext(FhirVersionEnum.R4);
         configureFhirHttpClient(fhirContext);
         return fhirContext;
+    }
+
+    /**
+     * Base-spec R4 instance validator ($validate), shared application-wide —
+     * construction is expensive, so it is a singleton bean, never per-request.
+     * Structure definitions (DefaultProfileValidationSupport, backed by
+     * hapi-fhir-validation-resources-r4) plus in-memory terminology so code-system
+     * lookups resolve instead of erroring.
+     */
+    @Bean
+    public FhirValidator fhirValidator(FhirContext fhirContext) {
+        ValidationSupportChain validationSupport = new ValidationSupportChain(
+                new DefaultProfileValidationSupport(fhirContext),
+                new InMemoryTerminologyServerValidationSupport(fhirContext),
+                new CommonCodeSystemsTerminologyService(fhirContext));
+        FhirValidator fhirValidator = fhirContext.newValidator();
+        fhirValidator.registerValidatorModule(new FhirInstanceValidator(validationSupport));
+        return fhirValidator;
     }
 
     public void configureFhirHttpClient(FhirContext fhirContext) {

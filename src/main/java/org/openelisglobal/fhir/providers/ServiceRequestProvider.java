@@ -18,6 +18,11 @@ import ca.uhn.fhir.rest.server.IResourceProvider;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;
+import ca.uhn.fhir.rest.server.exceptions.UnprocessableEntityException;
+import ca.uhn.fhir.validation.FhirValidator;
+import ca.uhn.fhir.validation.ResultSeverityEnum;
+import ca.uhn.fhir.validation.SingleValidationMessage;
+import ca.uhn.fhir.validation.ValidationResult;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -120,6 +125,9 @@ public class ServiceRequestProvider implements IResourceProvider {
     @Autowired
     private PatientService patientService;
 
+    @Autowired
+    private FhirValidator fhirValidator;
+
     @Override
     public Class<? extends IBaseResource> getResourceType() {
         return ServiceRequest.class;
@@ -170,6 +178,18 @@ public class ServiceRequestProvider implements IResourceProvider {
         final String method = "createServiceRequest";
 
         try {
+            final ValidationResult validationResult = fhirValidator.validateWithResult(serviceRequest);
+            final List<SingleValidationMessage> validationErrors = validationResult.getMessages().stream()
+                    .filter(message -> message.getSeverity() == ResultSeverityEnum.ERROR
+                            || message.getSeverity() == ResultSeverityEnum.FATAL)
+                    .collect(Collectors.toList());
+            if (!validationErrors.isEmpty()) {
+                LogEvent.logError(this.getClass().getSimpleName(), method, "ServiceRequest failed FHIR $validate with "
+                        + validationErrors.size() + " error(s): " + validationErrors);
+                throw new UnprocessableEntityException("ServiceRequest failed FHIR R4 instance validation",
+                        validationResult.toOperationOutcome());
+            }
+
             requireNonNull(request, "HttpServletRequest cannot be null");
 
             final String sysuserId = requireNonBlank(FhirProviderUtils.getSysUserId(request),
@@ -298,7 +318,7 @@ public class ServiceRequestProvider implements IResourceProvider {
             outcome.setResource(created);
             return outcome;
 
-        } catch (InvalidRequestException | ResourceNotFoundException e) {
+        } catch (InvalidRequestException | ResourceNotFoundException | UnprocessableEntityException e) {
             LogEvent.logError(this.getClass().getSimpleName(), method, safeMessage(e));
             throw e;
 
