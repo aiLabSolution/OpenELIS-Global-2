@@ -5,11 +5,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ca.uhn.fhir.context.FhirContext;
+import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
+import ca.uhn.fhir.validation.FhirValidator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.NonNull;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.hl7.fhir.common.hapi.validation.support.CommonCodeSystemsTerminologyService;
+import org.hl7.fhir.common.hapi.validation.support.InMemoryTerminologyServerValidationSupport;
+import org.hl7.fhir.common.hapi.validation.support.ValidationSupportChain;
+import org.hl7.fhir.common.hapi.validation.validator.FhirInstanceValidator;
 import org.itech.fhir.dataexport.api.service.DataExportService;
 import org.itech.fhir.dataexport.core.dao.DataExportTaskDAO;
 import org.itech.fhir.dataexport.core.service.DataExportTaskService;
@@ -185,6 +191,27 @@ public class AppTestConfig implements WebMvcConfigurer {
     @Profile("test")
     public FhirContext fhirContext() {
         return mock(FhirContext.class);
+    }
+
+    /**
+     * REAL R4 instance validator, mirroring {@code FhirConfig.fhirValidator}.
+     * {@code FhirConfig} (and the {@code FhirContext} bean) are mocked in the test
+     * context, so the production validator bean never gets registered here — but
+     * the LIS-42 fail-closed $validate gate in ServiceRequestProvider must run for
+     * real in web-context tests, so this builds the same chain on a private R4
+     * context.
+     */
+    @Bean
+    @Profile("test")
+    public FhirValidator fhirValidator() {
+        FhirContext validationContext = FhirContext.forR4();
+        ValidationSupportChain validationSupport = new ValidationSupportChain(
+                new DefaultProfileValidationSupport(validationContext),
+                new InMemoryTerminologyServerValidationSupport(validationContext),
+                new CommonCodeSystemsTerminologyService(validationContext));
+        FhirValidator fhirValidator = validationContext.newValidator();
+        fhirValidator.registerValidatorModule(new FhirInstanceValidator(validationSupport));
+        return fhirValidator;
     }
 
     @Bean()

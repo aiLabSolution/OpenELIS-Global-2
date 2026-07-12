@@ -1,7 +1,10 @@
 package org.openelisglobal.fhir;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.rest.server.RestfulServer;
@@ -12,6 +15,8 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.sql.Timestamp;
 import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -22,11 +27,14 @@ import org.openelisglobal.common.provider.validation.AccessionNumberValidatorFac
 import org.openelisglobal.common.provider.validation.IAccessionNumberGenerator;
 import org.openelisglobal.common.provider.validation.IAccessionNumberValidator;
 import org.openelisglobal.common.provider.validation.IAccessionNumberValidator.ValidationResults;
+import org.openelisglobal.common.services.IStatusService;
+import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.fhir.providers.ServiceRequestProvider;
 import org.openelisglobal.localization.service.LocalizationService;
 import org.openelisglobal.localization.valueholder.Localization;
 import org.openelisglobal.panel.service.PanelService;
 import org.openelisglobal.panel.valueholder.Panel;
+import org.openelisglobal.sample.service.SampleService;
 import org.openelisglobal.sample.util.AccessionNumberUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -52,6 +60,12 @@ public class ServiceRequestFacadeTest extends BaseWebContextSensitiveTest {
 
     @Autowired
     private AnalysisService analysisService;
+
+    @Autowired
+    private SampleService sampleService;
+
+    @Autowired
+    private IStatusService statusService;
 
     private RestfulServer fhirServlet;
     private ObjectMapper objectMapper;
@@ -281,6 +295,163 @@ public class ServiceRequestFacadeTest extends BaseWebContextSensitiveTest {
 
         JsonNode jsonResponse = objectMapper.readTree(response.getContentAsString());
         assertEquals("ServiceRequest", jsonResponse.get("resourceType").asText());
+    }
+
+    @Test
+    public void createServiceRequest_validRequest_returns201WithServerIdAndAppearsOnWorkplan() throws Exception {
+        cleanRowsInCurrentConnection(new String[] { "analysis", });
+        String subjectUUID = "b479ab79-5f53-4d1f-bc9b-10f19ce04635";
+        String specimenUUID = "68438220-5cef-44c4-9e6f-9f88e6b93270";
+        String practitionerUUID = "550e8400-e29b-41d4-a716-446655441004";
+        String locationUUID = "68438220-5cef-44c4-9e6f-9f88e6b93287";
+        String testId = "1";
+        String loinc = "123456";
+        String loincDisplay = "Blood Test";
+        MockHttpServletRequest request = buildFhirRequest("POST", "/ServiceRequest");
+        String jsonBody = """
+                {
+                "resourceType": "ServiceRequest",
+                "status": "active",
+                "intent": "order",
+                "priority": "routine",
+
+                "code": {
+                    "coding": [
+                    {
+                        "system": "http://loinc.org",
+                        "code": "%s",
+                        "display": "%s"
+                    }
+                    ]
+                },
+
+                "subject": {
+                    "reference": "Patient/%s"
+                },
+
+                "authoredOn": "2023-02-03T00:00:00Z",
+
+                "requester": {
+                    "reference": "Practitioner/%s"
+                },
+
+                "locationReference": [
+                    {
+                    "reference": "Location/%s"
+                    }
+                ],
+
+                "specimen": [
+                    {
+                    "reference": "Specimen/%s"
+                    }
+                ]
+                }
+                """.formatted(loinc, loincDisplay, subjectUUID, practitionerUUID, locationUUID, specimenUUID);
+        request.setContentType("application/json");
+        request.setContent(jsonBody.getBytes());
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        fhirServlet.service(request, response);
+
+        assertEquals(201, response.getStatus());
+
+        JsonNode jsonResponse = objectMapper.readTree(response.getContentAsString());
+        assertEquals("ServiceRequest", jsonResponse.get("resourceType").asText());
+
+        JsonNode idNode = jsonResponse.get("id");
+        assertNotNull("created ServiceRequest must carry a server-assigned id", idNode);
+        String serverAssignedId = idNode.asText();
+        assertFalse("server-assigned id must be non-empty", serverAssignedId.isBlank());
+        UUID serverAssignedUuid = UUID.fromString(serverAssignedId);
+        assertNotEquals("server must assign its own id", ANALYSIS1_FHIRID, serverAssignedId);
+
+        // The order must appear on the worklist: run the same workplan query
+        // WorkplanByTestRestController.getWorkplanByTest drives, with the status
+        // list built the way WorkplanRestController.initialize() builds it.
+        List<Analysis> workplanAnalyses = analysisService.getAllAnalysisByTestAndStatus(testId, workplanStatusList());
+        Analysis workplanEntry = workplanAnalyses.stream()
+                .filter(analysis -> serverAssignedUuid.equals(analysis.getFhirUuid())).findFirst().orElse(null);
+        assertNotNull("created order must appear in the workplan for test " + testId, workplanEntry);
+
+        String accessionNumber = workplanEntry.getSampleItem().getSample().getAccessionNumber();
+        assertNotNull("workplan entry must carry an accession number", accessionNumber);
+        assertFalse("workplan entry accession number must be non-empty", accessionNumber.isBlank());
+    }
+
+    @Test
+    public void createServiceRequest_failingFhirValidation_isRejectedWithoutCreatingOrder() throws Exception {
+        cleanRowsInCurrentConnection(new String[] { "analysis", });
+        int samplesBefore = sampleService.getAll().size();
+
+        String subjectUUID = "b479ab79-5f53-4d1f-bc9b-10f19ce04635";
+        String specimenUUID = "68438220-5cef-44c4-9e6f-9f88e6b93270";
+        String practitionerUUID = "550e8400-e29b-41d4-a716-446655441004";
+        String loinc = "123456";
+        String loincDisplay = "Blood Test";
+        MockHttpServletRequest request = buildFhirRequest("POST", "/ServiceRequest");
+        // Parses fine but is not R4-conformant: the required 1..1 elements
+        // 'status' and 'intent' are missing, so HAPI $validate must reject it.
+        String jsonBody = """
+                {
+                "resourceType": "ServiceRequest",
+                "priority": "routine",
+
+                "code": {
+                    "coding": [
+                    {
+                        "system": "http://loinc.org",
+                        "code": "%s",
+                        "display": "%s"
+                    }
+                    ]
+                },
+
+                "subject": {
+                    "reference": "Patient/%s"
+                },
+
+                "authoredOn": "2023-02-03T00:00:00Z",
+
+                "requester": {
+                    "reference": "Practitioner/%s"
+                },
+
+                "specimen": [
+                    {
+                    "reference": "Specimen/%s"
+                    }
+                ]
+                }
+                """.formatted(loinc, loincDisplay, subjectUUID, practitionerUUID, specimenUUID);
+        request.setContentType("application/json");
+        request.setContent(jsonBody.getBytes());
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        fhirServlet.service(request, response);
+
+        assertEquals(422, response.getStatus());
+
+        JsonNode jsonResponse = objectMapper.readTree(response.getContentAsString());
+        assertEquals("OperationOutcome", jsonResponse.get("resourceType").asText());
+
+        assertTrue("no analysis may be created for a ServiceRequest that fails $validate",
+                analysisService.getAll().isEmpty());
+        assertEquals("no sample may be created for a ServiceRequest that fails $validate", samplesBefore,
+                sampleService.getAll().size());
+    }
+
+    /**
+     * The workplan status list, built exactly as
+     * {@code WorkplanRestController.initialize()} builds it.
+     */
+    private List<String> workplanStatusList() {
+        return Arrays.asList(statusService.getStatusID(AnalysisStatus.NotStarted),
+                statusService.getStatusID(AnalysisStatus.BiologistRejected),
+                statusService.getStatusID(AnalysisStatus.TechnicalRejected),
+                statusService.getStatusID(AnalysisStatus.NonConforming_depricated));
     }
 
     @Test
