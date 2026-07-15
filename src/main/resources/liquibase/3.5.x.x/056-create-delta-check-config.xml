@@ -57,6 +57,13 @@
             tableName="delta_check_config"
             columnNames="test_id"
             constraintName="uk_delta_check_config_test"/>
+        <!-- a negative threshold would flag every result including a zero
+             change (adversarial-review P3); the engine also refuses such
+             config with NOT_EVALUABLE -->
+        <sql>ALTER TABLE delta_check_config ADD CONSTRAINT chk_delta_check_abs_nonneg
+            CHECK (absolute_change IS NULL OR absolute_change &gt;= 0)</sql>
+        <sql>ALTER TABLE delta_check_config ADD CONSTRAINT chk_delta_check_rel_nonneg
+            CHECK (relative_change_percent IS NULL OR relative_change_percent &gt;= 0)</sql>
     </changeSet>
 
 </databaseChangeLog>

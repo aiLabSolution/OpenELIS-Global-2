@@ -18,6 +18,15 @@ public interface DeltaCheckPriorResultDAO {
     String findPatientIdForAnalysis(String analysisId) throws LIMSRuntimeException;
 
     /**
+     * Whether the patient id is the shared unidentified-patient placeholder
+     * (PatientUtil's UNKNOWN_ person). Every ACCEPT_UNKNOWN analyzer accept
+     * attaches to that single row, so its "history" spans different physical
+     * patients — a delta comparison against it is meaningless (adversarial-review
+     * P2 on LIS-54).
+     */
+    boolean isUnknownPlaceholderPatient(String patientId) throws LIMSRuntimeException;
+
+    /**
      * The patient's most recent prior final result for a test: the Result whose
      * analysis is Finalized with the latest non-null released date (analysis id,
      * then result id, break exact ties), excluding the incoming analysis itself. A

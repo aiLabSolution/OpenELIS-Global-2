@@ -475,8 +475,22 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         accept(item("7859", "AVGT601", "58", 1));
         assertHeld("AVGT601", "delta check flagged", "58", "42", "16", "absolute threshold 10");
 
+        // a finalized analysis may carry qualifier/child rows with HIGHER
+        // result ids — the prior must be the numeric row, not the newest row
+        // (review P2): plant an alpha row on the finalized AVGT600 analysis
+        // allocate from result_seq (not max(id)+1) so the accept path's own
+        // sequence-generated insert cannot collide with the planted row
+        Integer qualifierRowId = jdbcTemplate.queryForObject("SELECT nextval('clinlims.result_seq')", Integer.class);
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.result (id, analysis_id, sort_order, result_type, value, lastupdated)"
+                        + " VALUES (?, ?, 2, 'A', 'reviewed - see chart', now())",
+                qualifierRowId, Integer.valueOf(findSingleAnalysis("AVGT600").getId()));
+
         // within-threshold change vs the finalized 42 prior (the HELD 58 is
-        // not final and must not be the comparison point): Δ = 2 -> passes
+        // not final and must not be the comparison point; the alpha qualifier
+        // row must not be either — an unparseable prior would silently turn
+        // the leg NOT_EVALUABLE and this assertion would still pass, so also
+        // check the pass note claims a real comparison): Δ = 2 -> passes
         accept(item("7869", "AVGT602", "44", 1));
         assertAutoFinalized("AVGT602");
         assertTrue("within-threshold result's note must record the delta pass",

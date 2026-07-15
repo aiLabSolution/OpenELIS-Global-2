@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
@@ -354,6 +355,47 @@ public class DeltaCheckServiceImplTest {
         assertOutcome(DeltaCheckVerdict.Outcome.NOT_EVALUABLE,
                 engine.evaluate(analysis, numericResult("100", "mmol/L")));
         verifyZeroInteractions(priorResultDAO);
+    }
+
+    @Test
+    public void unknownPlaceholderPatient_notEvaluable_priorLookupSkipped() {
+        // every ACCEPT_UNKNOWN accept shares one placeholder patient row — its
+        // "history" spans different physical patients (review P2)
+        givenConfig(config("5", null));
+        when(priorResultDAO.findPatientIdForAnalysis(ANALYSIS_ID)).thenReturn(PATIENT_ID);
+        when(priorResultDAO.isUnknownPlaceholderPatient(PATIENT_ID)).thenReturn(true);
+
+        DeltaCheckVerdict verdict = evaluate("100");
+        assertOutcome(DeltaCheckVerdict.Outcome.NOT_EVALUABLE, verdict);
+        assertTrue("reason must name the placeholder, got: " + verdict.getReason(),
+                verdict.getReason().contains("unidentified-patient placeholder"));
+        verify(priorResultDAO, never()).findMostRecentPriorFinalResult(anyString(), anyString(), anyString(),
+                anyString());
+    }
+
+    @Test
+    public void negativeThreshold_notEvaluable_notNoiseFlagging() {
+        // a negative threshold would flag every result including zero change
+        // (review P3): refuse to evaluate rather than hold everything
+        givenConfig(config("-1", null));
+        givenPrior("100", "mmol/L");
+        DeltaCheckVerdict absVerdict = evaluate("100");
+        assertOutcome(DeltaCheckVerdict.Outcome.NOT_EVALUABLE, absVerdict);
+        assertTrue("reason must say the config is invalid, got: " + absVerdict.getReason(),
+                absVerdict.getReason().contains("negative threshold"));
+
+        givenConfig(config(null, "-10"));
+        assertOutcome(DeltaCheckVerdict.Outcome.NOT_EVALUABLE, evaluate("100"));
+    }
+
+    @Test
+    public void zeroAbsoluteThreshold_zeroChangePasses_anyChangeFlags() {
+        givenConfig(config("0", null));
+        givenPrior("100", "mmol/L");
+
+        assertOutcome(DeltaCheckVerdict.Outcome.PASS, evaluate("100"));
+        assertOutcome(DeltaCheckVerdict.Outcome.PASS, evaluate("100.0"));
+        assertOutcome(DeltaCheckVerdict.Outcome.FLAGGED, evaluate("100.01"));
     }
 
     @Test

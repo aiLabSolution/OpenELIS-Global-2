@@ -82,6 +82,14 @@ public class DeltaCheckServiceImpl implements DeltaCheckService {
         if (config == null || (config.getAbsoluteChange() == null && config.getRelativeChangePercent() == null)) {
             return DeltaCheckVerdict.notEvaluable("no delta-check thresholds configured for test " + testId);
         }
+        if ((config.getAbsoluteChange() != null && config.getAbsoluteChange().signum() < 0)
+                || (config.getRelativeChangePercent() != null && config.getRelativeChangePercent().signum() < 0)) {
+            // a negative threshold would flag every result including a zero
+            // change — pure noise; refuse to evaluate against invalid config
+            // (the schema also CHECK-constrains this; belt and braces)
+            return DeltaCheckVerdict
+                    .notEvaluable("invalid delta-check configuration for test " + testId + ": negative threshold");
+        }
 
         if (!"N".equals(result.getResultType())) {
             return DeltaCheckVerdict
@@ -95,6 +103,13 @@ public class DeltaCheckServiceImpl implements DeltaCheckService {
         String patientId = priorResultDAO.findPatientIdForAnalysis(analysisId);
         if (patientId == null) {
             return DeltaCheckVerdict.notEvaluable("analysis " + analysisId + " is not linked to a patient");
+        }
+        if (priorResultDAO.isUnknownPlaceholderPatient(patientId)) {
+            // every ACCEPT_UNKNOWN accept shares one placeholder patient row, so
+            // its result history spans different physical patients — comparing
+            // against it would manufacture or mask deltas
+            return DeltaCheckVerdict.notEvaluable(
+                    "result belongs to the unidentified-patient placeholder — no per-patient history to compare");
         }
         Result prior = priorResultDAO.findMostRecentPriorFinalResult(patientId, testId, analysisId,
                 statusService.getStatusID(AnalysisStatus.Finalized));

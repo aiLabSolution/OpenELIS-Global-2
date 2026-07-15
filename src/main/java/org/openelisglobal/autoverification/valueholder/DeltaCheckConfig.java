@@ -22,6 +22,8 @@ import org.openelisglobal.common.valueholder.BaseObject;
  * unconfigured and the delta check NOT_EVALUABLE. Thresholds are NUMERIC /
  * {@link BigDecimal} so the flag-or-pass decision at the exact boundary is
  * decimal-exact (S5.3 AC1), not subject to binary floating-point rounding.
+ * Thresholds must be non-negative — the schema CHECK-constrains it and the
+ * engine answers NOT_EVALUABLE for invalid rows.
  */
 @Entity
 @Table(name = "delta_check_config", uniqueConstraints = @UniqueConstraint(columnNames = { "test_id" }))
