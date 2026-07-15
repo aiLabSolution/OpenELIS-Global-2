@@ -188,10 +188,14 @@ public class EdanLoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
      * outcome.
      */
     private void cleanupFixture() throws SQLException {
+        // One Test row per DISTINCT LOINC was inserted (shared-LOINC codes reuse it),
+        // so the id range spans FIXTURE_TEST_BASE_ID .. +(distinctLoincs-1) — not the
+        // 31-code panel size, which would over-reach past the inserted rows.
+        long distinctLoincs = EDAN_CODE_TO_LOINC.values().stream().distinct().count();
         try (Connection conn = dataSource.getConnection(); Statement st = conn.createStatement()) {
             st.executeUpdate("DELETE FROM clinlims.analyzer_test_map WHERE analyzer_id = " + FIXTURE_ANALYZER_ID);
             st.executeUpdate("DELETE FROM clinlims.test WHERE id BETWEEN " + FIXTURE_TEST_BASE_ID + " AND "
-                    + (FIXTURE_TEST_BASE_ID + EDAN_CODE_TO_LOINC.size()));
+                    + (FIXTURE_TEST_BASE_ID + distinctLoincs - 1));
             st.executeUpdate("DELETE FROM clinlims.analyzer WHERE id = " + FIXTURE_ANALYZER_ID);
         }
     }
