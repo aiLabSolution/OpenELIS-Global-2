@@ -5,6 +5,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -334,16 +335,19 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
     @Test
     public void clientPostedCompleteDate_cannotDefeatCrossDayBlock() {
         // Simulate a tampered/stale POST: the client posts the SAME day for
-        // both rows. resultList*.completeDate is in the controller's
-        // ALLOWED_FIELDS (client-bindable), so this must be overridden by the
-        // DB-hydrated stagingCompleteDate before the cross-day check runs —
-        // exactly like AnalyzerResultsPaging.updateCache replacing cache items
-        // wholesale from the client payload.
+        // both rows, on both date fields. The REAL vector is
+        // stagingCompleteDate itself — the REST accept path binds posted JSON
+        // via Jackson (@RequestBody), which ignores the controller's
+        // setAllowedFields, so a client CAN post it. The defense is that
+        // hydrateStagingFlags overwrites it unconditionally from the DB before
+        // the cross-day check reads it.
         AnalyzerResultItem original = reusedAccessionOriginalItem(true, false, false);
         AnalyzerResultItem correction = reusedAccessionCorrectionItem();
         correction.setCorrectionAction("USE");
         original.setCompleteDate("07/05/2025");
         correction.setCompleteDate("07/05/2025");
+        original.setStagingCompleteDate(Timestamp.valueOf("2025-07-05 10:00:00"));
+        correction.setStagingCompleteDate(Timestamp.valueOf("2025-07-05 10:00:00"));
         // see useCrossDayCorrection_...: REUSE300 also needs to clear the
         // orthogonal LIS-126 unmatched-sample gate to reach the code under test.
         original.setUnmatchedAction("ACCEPT_UNKNOWN");
@@ -354,5 +358,40 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
                 "hydration must restore the true DB completeDates, still blocking a cross-day USE",
                 UnresolvedCorrectionException.class, () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
         assertTrue("message must name the blocked accession", ex.getMessage().contains("REUSE300"));
+    }
+
+    @Test
+    public void useCrossDayOrphanCorrection_unmappedPartner_blocksFailClosed() {
+        // REUSE400: the writable original (1015) is UNMAPPED (no testId), so
+        // hydration forces it readOnly and findPartner — which only considers
+        // non-readOnly candidates — cannot see it. The cross-day USE on 1016
+        // then lands in the orphan branch, which pre-fix committed the value
+        // with only an auto-note. The guard must reach through the
+        // duplicateAnalyzerResultId backlink to the staging row instead.
+        AnalyzerResultItem original = buildItem("1015", "12", true, "1016", null, "REUSE400", "HGB", 1, true, false,
+                false);
+        original.setCompleteDate("07/01/2025");
+        // 1015 is itself correction-shaped after hydration (readOnly + backlink)
+        // and would trip the unresolved gate without a decision; DISMISS it so
+        // the orphan USE path — not the unresolved gate — is what is under test.
+        original.setCorrectionAction("DISMISS");
+        // clears the downstream LIS-126 unmatched gate, like the REUSE300 tests
+        original.setUnmatchedAction("ACCEPT_UNKNOWN");
+
+        AnalyzerResultItem correction = buildItem("1016", "8", true, "1015", "4001", "REUSE400", "HGB", 1, false, false,
+                false);
+        correction.setCompleteDate("07/02/2025");
+        correction.setCorrectionAction("USE");
+
+        List<AnalyzerResultItem> items = new ArrayList<>(List.of(original, correction));
+
+        UnresolvedCorrectionException ex = assertThrows(UnresolvedCorrectionException.class,
+                () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
+        assertTrue("message must name the blocked accession", ex.getMessage().contains("REUSE400"));
+
+        assertNotNull("unmapped original must remain staged, not silently deleted",
+                analyzerResultsService.readAnalyzerResults("1015"));
+        assertNotNull("correction must remain staged, not silently deleted",
+                analyzerResultsService.readAnalyzerResults("1016"));
     }
 }

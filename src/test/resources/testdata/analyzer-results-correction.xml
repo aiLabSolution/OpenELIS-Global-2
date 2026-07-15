@@ -107,4 +107,22 @@
         read_only="true" duplicate_id="1013" positive="false"
         complete_date="2025-07-02 08:15:00" test_result_type="N"
         test_id="4001" />
+
+    <!-- id=1015/1016: LIS-128 orphan-branch variant — the writable original
+         (1015) is UNMAPPED (no test_id), so hydration forces it readOnly and
+         findPartner cannot see it; the cross-day USE on 1016 lands in the
+         orphan branch and must still be refused via the
+         duplicateAnalyzerResultId backlink lookup. -->
+    <analyzer_results id="1015" analyzer_id="2001"
+        accession_number="REUSE400" test_name="HGB" result="12"
+        units="g/dL" iscontrol="false" last_updated="2025-07-01 09:00:00"
+        read_only="false" duplicate_id="1016" positive="false"
+        complete_date="2025-07-01 09:00:00" test_result_type="N" />
+
+    <analyzer_results id="1016" analyzer_id="2001"
+        accession_number="REUSE400" test_name="HGB" result="8"
+        units="g/dL" iscontrol="false" last_updated="2025-07-02 09:05:00"
+        read_only="true" duplicate_id="1015" positive="false"
+        complete_date="2025-07-02 09:05:00" test_result_type="N"
+        test_id="4001" />
 </dataset>

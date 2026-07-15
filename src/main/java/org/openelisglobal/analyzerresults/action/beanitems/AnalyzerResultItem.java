@@ -65,12 +65,15 @@ public class AnalyzerResultItem implements Serializable {
     @ValidDate(groups = { AnalyzerResultsForm.AnalyzerResuts.class })
     private String completeDate;
 
-    // Transient, DB-hydrated at accept time
-    // (AnalyzerResultsAcceptServiceImpl.hydrateStagingFlags): the staging
-    // row's true completeDate, used for the LIS-128 cross-day
-    // linked-correction guard. Unlike completeDate above it must NEVER be
-    // added to AnalyzerResultsController's ALLOWED_FIELDS — keeping it
-    // non-client-bindable is what makes the guard tamper-proof.
+    // Transient: the staging row's true completeDate, used by the LIS-128
+    // cross-day linked-correction guard.
+    // AnalyzerResultsAcceptServiceImpl.hydrateStagingFlags overwrites this
+    // UNCONDITIONALLY from the DB before any read — that overwrite is the
+    // tamper defense and must stay unconditional: the REST accept path binds
+    // posted JSON via Jackson (@RequestBody), which ignores the controller's
+    // setAllowedFields, so a posted value CAN land here. Keeping this field
+    // out of AnalyzerResultsController's ALLOWED_FIELDS protects only the
+    // legacy form path; never rely on that alone.
     private Timestamp stagingCompleteDate;
 
     private boolean isPositive = false;
