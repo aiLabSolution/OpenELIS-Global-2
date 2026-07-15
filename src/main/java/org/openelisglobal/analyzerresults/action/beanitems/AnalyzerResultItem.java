@@ -65,6 +65,14 @@ public class AnalyzerResultItem implements Serializable {
     @ValidDate(groups = { AnalyzerResultsForm.AnalyzerResuts.class })
     private String completeDate;
 
+    // Transient, DB-hydrated at accept time
+    // (AnalyzerResultsAcceptServiceImpl.hydrateStagingFlags): the staging
+    // row's true completeDate, used for the LIS-128 cross-day
+    // linked-correction guard. Unlike completeDate above it must NEVER be
+    // added to AnalyzerResultsController's ALLOWED_FIELDS — keeping it
+    // non-client-bindable is what makes the guard tamper-proof.
+    private Timestamp stagingCompleteDate;
+
     private boolean isPositive = false;
     private String duplicateAnalyzerResultId;
     private boolean isHighlighted = false;
@@ -249,6 +257,14 @@ public class AnalyzerResultItem implements Serializable {
 
     public String getCompleteDate() {
         return completeDate;
+    }
+
+    public void setStagingCompleteDate(Timestamp stagingCompleteDate) {
+        this.stagingCompleteDate = stagingCompleteDate;
+    }
+
+    public Timestamp getStagingCompleteDate() {
+        return stagingCompleteDate;
     }
 
     public void setPositive(boolean isPositive) {
