@@ -15,6 +15,7 @@ import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
+import org.openelisglobal.autoverification.service.AutoverificationGateService;
 import org.openelisglobal.common.action.IActionConstants;
 import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.services.IStatusService;
@@ -96,6 +97,8 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
     private IStatusService statusService;
     @Autowired
     private ResultLimitService resultLimitService;
+    @Autowired
+    private AutoverificationGateService autoverificationGateService;
 
     // ---------------------------------------------------------------
     // Public entry point
@@ -135,6 +138,20 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         }
 
         analyzerResultsService.persistAnalyzerResults(deletableAnalyzerResults, sampleGroupList, sysUserId);
+
+        // LIS-55: autoverification gate runs after the accept transaction has
+        // committed. Fail-safe by construction — if the gate errors, accepted
+        // analyses simply remain at TechnicalAcceptance in the human
+        // validation queue, exactly as before the gate existed. An accept is
+        // never rolled back by a gate failure.
+        try {
+            autoverificationGateService.evaluateAndFinalize(sampleGroupList, sysUserId);
+        } catch (RuntimeException e) {
+            LogEvent.logError(this.getClass().getSimpleName(), "acceptAndPersist",
+                    "Autoverification gate failed — accepted results remain held for human validation: "
+                            + e.getMessage());
+            LogEvent.logError(e);
+        }
     }
 
     // ---------------------------------------------------------------
