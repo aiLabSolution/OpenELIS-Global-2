@@ -138,6 +138,7 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
             ReflectionTestUtils.setField(gateTarget, "deltaCheckService", originalDeltaCheckService);
         }
         jdbcTemplate.update("DELETE FROM clinlims.result_limits WHERE id = 7830");
+        jdbcTemplate.update("DELETE FROM clinlims.delta_check_config WHERE id = 'delta-avg-001'");
 
         // the base class runs without a test transaction, so accepted rows and
         // QC evaluation output are real commits — remove them
@@ -196,6 +197,53 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
                 notStartedId);
     }
 
+    /**
+     * Seed three pre-existing ORDERED samples (AVGT600/601/602) for ONE patient —
+     * the LIS-54 delta check compares across a patient's samples, so all three
+     * chains hang off patient 7861. Same raw-SQL idiom as
+     * {@link #seedOrderedSample()}.
+     */
+    private void seedOrderedSamplesForDeltaPatient() {
+        String startedId = statusService.getStatusID(StatusService.OrderStatus.Started);
+        String sampleEnteredId = statusService.getStatusID(StatusService.SampleStatus.Entered);
+        String notStartedId = statusService.getStatusID(AnalysisStatus.NotStarted);
+
+        jdbcTemplate.update("INSERT INTO clinlims.person (id, lastupdated) VALUES (7860, now())");
+        jdbcTemplate.update("INSERT INTO clinlims.patient (id, person_id, lastupdated) VALUES (7861, 7860, now())");
+
+        int sampleId = 7871;
+        int sampleHumanId = 7881;
+        int sampleItemId = 7874;
+        int analysisId = 7877;
+        for (String accession : new String[] { "AVGT600", "AVGT601", "AVGT602" }) {
+            jdbcTemplate.update(
+                    "INSERT INTO clinlims.sample (id, accession_number, domain, status_id, entered_date,"
+                            + " received_date, lastupdated) VALUES (?, ?, 'H', ?::numeric, now(), now(), now())",
+                    sampleId, accession, startedId);
+            jdbcTemplate.update("INSERT INTO clinlims.sample_human (id, samp_id, patient_id, lastupdated)"
+                    + " VALUES (?, ?, 7861, now())", sampleHumanId, sampleId);
+            jdbcTemplate.update(
+                    "INSERT INTO clinlims.sample_item (id, samp_id, sort_order, typeosamp_id, status_id,"
+                            + " lastupdated) VALUES (?, ?, 1, 7815, ?::numeric, now())",
+                    sampleItemId, sampleId, sampleEnteredId);
+            jdbcTemplate.update(
+                    "INSERT INTO clinlims.analysis (id, sampitem_id, test_id, status_id, analysis_type,"
+                            + " revision, lastupdated) VALUES (?, ?, 7810, ?::numeric, 'MANUAL', '1', now())",
+                    analysisId, sampleItemId, notStartedId);
+            sampleId++;
+            sampleHumanId++;
+            sampleItemId++;
+            analysisId++;
+        }
+    }
+
+    /** Per-test delta thresholds for test 7810 (absolute change only). */
+    private void configureDeltaAbsoluteThreshold(String absoluteChange) {
+        jdbcTemplate.update("INSERT INTO clinlims.delta_check_config (id, test_id, absolute_change,"
+                + " relative_change_percent, active, last_updated)"
+                + " VALUES ('delta-avg-001', 7810, ?::numeric, NULL, true, now())", absoluteChange);
+    }
+
     private void ensureStatusRow(String id, String code, String name, String statusType) {
         jdbcTemplate.update(
                 "INSERT INTO clinlims.status_of_sample (id, code, name, description, status_type, lastupdated)"
@@ -223,6 +271,14 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         item.setIsControl(false);
         item.setTestResultType("N");
         item.setAnalyzerId(ANALYZER_ID);
+        // The LIS-126 unmatched-sample gate (merged concurrently with LIS-55,
+        // core CI never ran the combination) fail-closes accepts whose
+        // accession has no registered order unless the technician explicitly
+        // accepts under the unidentified-patient placeholder. These scenarios
+        // predate real orders on purpose, so confirm like the technician
+        // would; for accessions with a seeded order (AVGT500/6xx) the gate
+        // never consults this field.
+        item.setUnmatchedAction("ACCEPT_UNKNOWN");
         // Analysis.setCompletedDateForDisplay parses the configured display
         // format: the test DB seeds default date locale fr-FR, whose
         // date.format.formatKey is dd/MM/yyyy
@@ -392,6 +448,39 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         List<String> notes = gateNotes(analysis);
         assertEquals(1, notes.size());
         assertTrue(notes.get(0).contains("Auto-verified by system"));
+    }
+
+    // ---------------------------------------------------------------
+    // LIS-54 — real delta engine, end to end (S5.3 AC2 in CI)
+    // ---------------------------------------------------------------
+
+    @Test
+    public void deltaCheck_endToEnd_flagsImplausibleJump_passesWithinThreshold() throws Exception {
+        // no delta stub anywhere here — this drives the @Primary LIS-54 engine
+        // through the real accept path against the real database
+        seedOrderedSamplesForDeltaPatient();
+        configureDeltaAbsoluteThreshold("10");
+        runQC("102.0", "ACCEPTED");
+
+        // first result: no prior final result yet -> NOT_EVALUABLE -> does not
+        // block; 42 is in range, run is in control -> auto-finalizes and
+        // becomes the patient's prior
+        accept(item("7858", "AVGT600", "42", 1));
+        assertAutoFinalized("AVGT600");
+        assertTrue("first result's note must record the delta leg as not evaluable",
+                gateNotes(findSingleAnalysis("AVGT600")).get(0).contains("delta: not evaluable"));
+
+        // implausible jump: 58 is IN range (40-60) — only the delta leg can
+        // hold it. Δ = |58-42| = 16 > 10.
+        accept(item("7859", "AVGT601", "58", 1));
+        assertHeld("AVGT601", "delta check flagged", "58", "42", "16", "absolute threshold 10");
+
+        // within-threshold change vs the finalized 42 prior (the HELD 58 is
+        // not final and must not be the comparison point): Δ = 2 -> passes
+        accept(item("7869", "AVGT602", "44", 1));
+        assertAutoFinalized("AVGT602");
+        assertTrue("within-threshold result's note must record the delta pass",
+                gateNotes(findSingleAnalysis("AVGT602")).get(0).contains("delta: within threshold"));
     }
 
     @Test
