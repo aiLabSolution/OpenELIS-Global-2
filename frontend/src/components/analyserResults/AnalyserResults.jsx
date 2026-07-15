@@ -296,6 +296,50 @@ const AnalyserResults = (props) => {
           </>
         );
       case "testName":
+        if (
+          row.rawCode ||
+          row.rawUnit ||
+          row.loinc ||
+          row.ucumValue ||
+          row.normalizationStatus
+        ) {
+          const notAvailable = intl.formatMessage({ id: "not.available" });
+          return (
+            <div className="sampleInfo" data-testid="sampleInfo">
+              <div>{row.testName}</div>
+              {(row.rawCode || row.loinc) && (
+                <Tag type="blue" size="sm">
+                  {intl.formatMessage(
+                    { id: "analyzer.resultProvenance.code" },
+                    {
+                      rawCode: row.rawCode || notAvailable,
+                      loinc: row.loinc || notAvailable,
+                    },
+                  )}
+                </Tag>
+              )}
+              {(row.rawUnit || row.ucumValue) && (
+                <Tag type="gray" size="sm">
+                  {intl.formatMessage(
+                    { id: "analyzer.resultProvenance.unit" },
+                    {
+                      rawUnit: row.rawUnit || notAvailable,
+                      ucumValue: row.ucumValue || notAvailable,
+                    },
+                  )}
+                </Tag>
+              )}
+              {row.normalizationStatus && (
+                <Tag type="outline" size="sm">
+                  {intl.formatMessage(
+                    { id: "analyzer.resultProvenance.status" },
+                    { status: row.normalizationStatus },
+                  )}
+                </Tag>
+              )}
+            </div>
+          );
+        }
         return (
           <div className="sampleInfo" data-testid="sampleInfo">
             {row.testName}

@@ -41,4 +41,14 @@ public class AnalyzerResultsControllerTest extends BaseWebContextSensitiveTest {
         mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultList[0].unmatchedSample").value(true));
     }
+
+    @Test
+    public void showRestAnalyzerResults_ShouldExposeStoredNormalizationProvenance() throws Exception {
+        mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultList[0].rawCode").value("GLU"))
+                .andExpect(jsonPath("$.resultList[0].rawUnit").value("mmol/L"))
+                .andExpect(jsonPath("$.resultList[0].loinc").value("2345-7"))
+                .andExpect(jsonPath("$.resultList[0].ucumValue").value("mmol/L"))
+                .andExpect(jsonPath("$.resultList[0].normalizationStatus").value("NORMALIZED"));
+    }
 }

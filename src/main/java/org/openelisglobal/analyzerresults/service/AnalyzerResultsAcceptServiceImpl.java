@@ -247,12 +247,12 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
 
     /**
      * Re-reads the persisted staging row for every actionable item and overwrites
-     * the trust-sensitive {@code readOnly} / {@code duplicateAnalyzerResultId}
-     * flags from the database. The REST accept path replaces cached items wholesale
-     * from the client POST ({@code AnalyzerResultsPaging.updateCache}), so a posted
-     * item cannot be trusted to still reflect the staging row it was rendered from
-     * — a tampered or stale post must not be able to turn a linked correction into
-     * an ordinary editable row.
+     * trust-sensitive flags and all normalization provenance from the database. The
+     * REST accept path replaces cached items wholesale from the client POST
+     * ({@code AnalyzerResultsPaging.updateCache}), so a posted item cannot be trusted
+     * to still reflect the staging row it was rendered from — a tampered or stale
+     * post must not be able to turn a linked correction into an ordinary editable
+     * row or forge clinical provenance.
      */
     void hydrateStagingFlags(List<AnalyzerResultItem> items) {
         for (AnalyzerResultItem item : items) {
@@ -268,6 +268,13 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             // correction skip resolveLinkedCorrections entirely (it is excluded there),
             // reopening the silent-drop path — so it too must come from the DB.
             item.setIsControl(entity.getIsControl());
+            // Normalization provenance is persisted clinical input, not editable POST
+            // state. Always overwrite all five fields from the staging row.
+            item.setRawCode(entity.getRawCode());
+            item.setRawUnit(entity.getRawUnit());
+            item.setLoinc(entity.getLoinc());
+            item.setUcumValue(entity.getUcumValue());
+            item.setNormalizationStatus(entity.getNormalizationStatus());
             // the staging row's true completeDate, for the LIS-128 cross-day
             // linked-correction guard. This overwrite is UNCONDITIONAL and happens
             // before any read — that is the guard's tamper defense: the REST accept
@@ -382,6 +389,7 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
                                 item.getResult());
                         partner.setResult(item.getResult());
                         partner.setCompleteDate(item.getCompleteDate());
+                        copyNormalizationProvenance(partner, item);
                     }
                 } else if ("DISMISS".equals(action)) {
                     AnalyzerResultItem partner = findPartner(group, item);
@@ -1006,7 +1014,25 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             result = createNewResult(resultItem, patient, sysUserId);
         }
 
+        copyNormalizationProvenance(result, resultItem);
+
         return result;
+    }
+
+    private void copyNormalizationProvenance(AnalyzerResultItem target, AnalyzerResultItem source) {
+        target.setRawCode(source.getRawCode());
+        target.setRawUnit(source.getRawUnit());
+        target.setLoinc(source.getLoinc());
+        target.setUcumValue(source.getUcumValue());
+        target.setNormalizationStatus(source.getNormalizationStatus());
+    }
+
+    private void copyNormalizationProvenance(Result target, AnalyzerResultItem source) {
+        target.setRawCode(source.getRawCode());
+        target.setRawUnit(source.getRawUnit());
+        target.setLoinc(source.getLoinc());
+        target.setUcumValue(source.getUcumValue());
+        target.setStatus(source.getNormalizationStatus());
     }
 
     private Result createNewResult(AnalyzerResultItem resultItem, Patient patient, String sysUserId) {

@@ -43,7 +43,9 @@
         units="mmol/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
         read_only="false" duplicate_id="1001" positive="false"
         complete_date="2025-07-01 08:15:00" test_result_type="N"
-        test_id="4001" />
+        test_id="4001" raw_code="GLU" raw_unit="mmol/L"
+        loinc="2345-7" ucum_value="mmol/L"
+        normalization_status="NORMALIZED" />
 
     <analyzer_results id="1002" analyzer_id="2002"
         accession_number="ACC789012" test_name="Hemoglobin" result="13.2"

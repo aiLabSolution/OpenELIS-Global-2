@@ -31,6 +31,11 @@ public class AnalyzerResultItem implements Serializable {
     private String analysisId;
     private String units;
     private String testName;
+    private String rawCode;
+    private String rawUnit;
+    private String loinc;
+    private String ucumValue;
+    private String normalizationStatus;
 
     // TODO move all accession number to the same format so they can be validated
     // properly
@@ -172,6 +177,46 @@ public class AnalyzerResultItem implements Serializable {
 
     public String getUnits() {
         return units;
+    }
+
+    public String getRawCode() {
+        return rawCode;
+    }
+
+    public void setRawCode(String rawCode) {
+        this.rawCode = rawCode;
+    }
+
+    public String getRawUnit() {
+        return rawUnit;
+    }
+
+    public void setRawUnit(String rawUnit) {
+        this.rawUnit = rawUnit;
+    }
+
+    public String getLoinc() {
+        return loinc;
+    }
+
+    public void setLoinc(String loinc) {
+        this.loinc = loinc;
+    }
+
+    public String getUcumValue() {
+        return ucumValue;
+    }
+
+    public void setUcumValue(String ucumValue) {
+        this.ucumValue = ucumValue;
+    }
+
+    public String getNormalizationStatus() {
+        return normalizationStatus;
+    }
+
+    public void setNormalizationStatus(String normalizationStatus) {
+        this.normalizationStatus = normalizationStatus;
     }
 
     public void setAccessionNumber(String accessionNumber) {
