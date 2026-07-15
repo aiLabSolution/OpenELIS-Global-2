@@ -5,6 +5,9 @@ name: E2E / Authoritative Executor (Reusable)
 
 on:
   workflow_call:
+    secrets:
+      AILAB_SUBMODULE_TOKEN:
+        required: false
     inputs:
       checkout_ref:
         description: "Ref to checkout for test execution"
@@ -83,6 +86,8 @@ jobs:
       checkout_ref: ${{ inputs.checkout_ref }}
       test_user: ${{ inputs.test_user || vars.TEST_USER || 'admin' }}
       test_pass: ${{ inputs.test_pass || vars.TEST_PASS || 'adminADMIN!' }}
+    secrets:
+      AILAB_SUBMODULE_TOKEN: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
   # ─── Playwright Harness ─────────────────────────────────────────────────────
   # Runs harness-foundational and harness-demo projects on the analyzer harness.
@@ -105,6 +110,8 @@ jobs:
       checkout_ref: ${{ inputs.checkout_ref }}
       test_user: ${{ inputs.test_user || vars.TEST_USER || 'admin' }}
       test_pass: ${{ inputs.test_pass || vars.TEST_PASS || 'adminADMIN!' }}
+    secrets:
+      AILAB_SUBMODULE_TOKEN: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
   # ─── Cypress (Deprecated) ──────────────────────────────────────────────────
   cypress:
@@ -120,6 +127,8 @@ jobs:
       head_sha: ${{ inputs.checkout_ref }}
       test_user: ${{ inputs.test_user || vars.TEST_USER || 'admin' }}
       test_pass: ${{ inputs.test_pass || vars.TEST_PASS || 'adminADMIN!' }}
+    secrets:
+      AILAB_SUBMODULE_TOKEN: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
   # ─── Suite Gate ─────────────────────────────────────────────────────────────
   e2e-suite-gate:

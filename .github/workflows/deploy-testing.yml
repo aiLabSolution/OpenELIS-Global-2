@@ -33,7 +33,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
+          persist-credentials: false
 
       - name: Gate on backend Checkpoint green
         if: ${{ inputs.require_green }}

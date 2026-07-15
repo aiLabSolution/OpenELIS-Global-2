@@ -33,6 +33,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
           persist-credentials: false
 
