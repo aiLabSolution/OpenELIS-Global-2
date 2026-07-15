@@ -24,7 +24,7 @@
     <!-- rename (qc/006) documents the BaseObject @Column(name =            -->
     <!-- "last_updated") mapping this must match.                            -->
     <!-- ================================================================== -->
-    <changeSet id="lis54-056-create-delta-check-config" author="lis">
+    <changeSet id="lis54-057-create-delta-check-config" author="lis">
         <preConditions onFail="MARK_RAN">
             <not>
                 <tableExists tableName="delta_check_config"/>

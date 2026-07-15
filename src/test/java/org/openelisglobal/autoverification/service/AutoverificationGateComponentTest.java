@@ -276,13 +276,11 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         item.setIsControl(false);
         item.setTestResultType("N");
         item.setAnalyzerId(ANALYZER_ID);
-        // The LIS-126 unmatched-sample gate (merged concurrently with LIS-55,
-        // core CI never ran the combination) fail-closes accepts whose
-        // accession has no registered order unless the technician explicitly
-        // accepts under the unidentified-patient placeholder. These scenarios
-        // predate real orders on purpose, so confirm like the technician
-        // would; for accessions with a seeded order (AVGT500/6xx) the gate
-        // never consults this field.
+        // These synthetic accessions intentionally have no pre-existing order.
+        // LIS-126 requires the technician's explicit confirmation before such
+        // analyzer results may be committed under the unidentified patient.
+        // For accessions with a seeded order (AVGT500/6xx) the gate never
+        // consults this field.
         item.setUnmatchedAction("ACCEPT_UNKNOWN");
         // Analysis.setCompletedDateForDisplay parses the configured display
         // format: the test DB seeds default date locale fr-FR, whose

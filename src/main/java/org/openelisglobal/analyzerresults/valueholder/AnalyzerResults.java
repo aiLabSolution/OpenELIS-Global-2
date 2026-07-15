@@ -61,6 +61,21 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     @Column(name = "UNITS")
     private String units;
 
+    @Column(name = "raw_code", length = 80)
+    private String rawCode;
+
+    @Column(name = "raw_unit", length = 40)
+    private String rawUnit;
+
+    @Column(name = "loinc", length = 80)
+    private String loinc;
+
+    @Column(name = "ucum_value", length = 40)
+    private String ucumValue;
+
+    @Column(name = "normalization_status", length = 20)
+    private String normalizationStatus;
+
     @Column(name = "DUPLICATE_ID", length = 10)
     @Convert(converter = StringToIntegerConverter.class)
     private String duplicateAnalyzerResultId;
@@ -174,6 +189,46 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     public String getUnits() {
         return units;
+    }
+
+    public String getRawCode() {
+        return rawCode;
+    }
+
+    public void setRawCode(String rawCode) {
+        this.rawCode = rawCode;
+    }
+
+    public String getRawUnit() {
+        return rawUnit;
+    }
+
+    public void setRawUnit(String rawUnit) {
+        this.rawUnit = rawUnit;
+    }
+
+    public String getLoinc() {
+        return loinc;
+    }
+
+    public void setLoinc(String loinc) {
+        this.loinc = loinc;
+    }
+
+    public String getUcumValue() {
+        return ucumValue;
+    }
+
+    public void setUcumValue(String ucumValue) {
+        this.ucumValue = ucumValue;
+    }
+
+    public String getNormalizationStatus() {
+        return normalizationStatus;
+    }
+
+    public void setNormalizationStatus(String normalizationStatus) {
+        this.normalizationStatus = normalizationStatus;
     }
 
     public void setIsControl(boolean isControl) {

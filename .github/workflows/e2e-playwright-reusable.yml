@@ -7,6 +7,9 @@ name: E2E / Playwright (Reusable)
 
 on:
   workflow_call:
+    secrets:
+      AILAB_SUBMODULE_TOKEN:
+        required: false
     inputs:
       projects:
         description: "Comma-separated Playwright projects to run (e.g. core-app,core-demo)"
@@ -133,6 +136,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
           persist-credentials: false
 

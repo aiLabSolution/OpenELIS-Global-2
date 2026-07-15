@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="lis133-001-add-analyzer-results-normalization-provenance" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists schemaName="clinlims" tableName="analyzer_results" columnName="raw_code"/>
+            </not>
+        </preConditions>
+        <comment>Preserve analyzer-native code/unit and normalized LOINC/UCUM provenance throughout the staging and accept workflow (LIS-133).</comment>
+
+        <addColumn schemaName="clinlims" tableName="analyzer_results">
+            <column name="raw_code" type="VARCHAR(80)"/>
+            <column name="raw_unit" type="VARCHAR(40)"/>
+            <column name="loinc" type="VARCHAR(80)"/>
+            <column name="ucum_value" type="VARCHAR(40)"/>
+            <column name="normalization_status" type="VARCHAR(20)"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="raw_code"/>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="raw_unit"/>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="loinc"/>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="ucum_value"/>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="normalization_status"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

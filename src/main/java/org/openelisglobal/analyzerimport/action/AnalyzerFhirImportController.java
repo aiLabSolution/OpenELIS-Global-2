@@ -19,6 +19,7 @@ import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
 import org.hibernate.ObjectNotFoundException;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Device;
 import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.Observation;
@@ -69,6 +70,8 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
     private static final String CLASS_NAME = "AnalyzerFhirImportController";
     private static final String OPENELIS_FHIR_TAG_SYSTEM = "http://openelis-global.org/fhir/tags";
     private static final String CALIBRATION_TAG = "CALIBRATION";
+    private static final String LOINC_SYSTEM = "http://loinc.org";
+    private static final String UCUM_SYSTEM = "http://unitsofmeasure.org";
 
     @Autowired
     private AnalyzerResultsService analyzerResultsService;
@@ -317,7 +320,7 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             return null;
         }
         for (org.hl7.fhir.r4.model.Coding coding : obs.getCode().getCoding()) {
-            if ("http://loinc.org".equals(coding.getSystem()) && coding.hasCode()) {
+            if (LOINC_SYSTEM.equals(coding.getSystem()) && coding.hasCode()) {
                 String loinc = coding.getCode();
                 if (loinc != null && !loinc.isBlank()) {
                     List<org.openelisglobal.test.valueholder.Test> tests = testService.getTestsByLoincCode(loinc);
@@ -359,12 +362,18 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             return null;
         }
 
-        // Test code from Observation.code (raw analyzer code, e.g., "WBC")
-        String testCode = null;
-        if (obs.hasCode() && obs.getCode().hasCoding()) {
-            var coding = obs.getCode().getCodingFirstRep();
-            testCode = coding.getCode() != null ? coding.getCode() : coding.getDisplay();
-        } else if (obs.hasCode() && obs.getCode().hasText()) {
+        String loincCode = findLoincCode(obs);
+        String rawCode = findRawAnalyzerCode(obs);
+        ar.setLoinc(loincCode);
+        ar.setRawCode(rawCode);
+
+        // Raw analyzer code remains the legacy analyzer-test-map lookup key. For
+        // older non-dual-coded payloads, retain the prior first-coding/text fallback.
+        String testCode = rawCode;
+        if (testCode == null && obs.hasCode() && obs.getCode().hasCoding()) {
+            Coding coding = obs.getCode().getCodingFirstRep();
+            testCode = coding.hasCode() ? coding.getCode() : coding.getDisplay();
+        } else if (testCode == null && obs.hasCode() && obs.getCode().hasText()) {
             testCode = obs.getCode().getText();
         }
 
@@ -411,6 +420,10 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         if (obs.hasValueQuantity()) {
             ar.setResult(obs.getValueQuantity().getValue().toPlainString());
             ar.setUnits(obs.getValueQuantity().getUnit());
+            ar.setRawUnit(obs.getValueQuantity().getUnit());
+            if (UCUM_SYSTEM.equals(obs.getValueQuantity().getSystem()) && obs.getValueQuantity().hasCode()) {
+                ar.setUcumValue(obs.getValueQuantity().getCode());
+            }
             ar.setResultType("N");
         } else if (obs.hasValueStringType()) {
             ar.setResult(obs.getValueStringType().getValue());
@@ -425,6 +438,8 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             LogEvent.logWarn(CLASS_NAME, "mapObservationToAnalyzerResult", "Observation has no value — skipping");
             return null;
         }
+
+        ar.setNormalizationStatus(normalizationStatus(ar.getLoinc(), ar.getUcumValue()));
 
         // QC/control flag from bridge tag. QC (MSH-16=2) rows are staged for the
         // Westgard pipeline and audit trail, but marked read-only so the analyzer-
@@ -481,6 +496,36 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         }
 
         return ar;
+    }
+
+    private String findLoincCode(Observation observation) {
+        if (observation == null || !observation.hasCode() || !observation.getCode().hasCoding()) {
+            return null;
+        }
+        return observation.getCode().getCoding().stream()
+                .filter(coding -> LOINC_SYSTEM.equals(coding.getSystem()) && coding.hasCode()).map(Coding::getCode)
+                .filter(code -> code != null && !code.isBlank()).findFirst().orElse(null);
+    }
+
+    private String findRawAnalyzerCode(Observation observation) {
+        if (observation == null || !observation.hasCode() || !observation.getCode().hasCoding()) {
+            return null;
+        }
+        return observation.getCode().getCoding().stream()
+                .filter(coding -> coding.getSystem() == null || coding.getSystem().isBlank()).filter(Coding::hasCode)
+                .map(Coding::getCode).filter(code -> code != null && !code.isBlank()).findFirst().orElse(null);
+    }
+
+    private String normalizationStatus(String loinc, String ucumValue) {
+        boolean hasLoinc = loinc != null && !loinc.isBlank();
+        boolean hasUcum = ucumValue != null && !ucumValue.isBlank();
+        if (hasLoinc && hasUcum) {
+            return "NORMALIZED";
+        }
+        if (hasLoinc || hasUcum) {
+            return "PARTIAL";
+        }
+        return "UNMAPPED";
     }
 
     /**

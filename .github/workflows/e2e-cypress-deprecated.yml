@@ -6,6 +6,9 @@ name: E2E / Cypress (Deprecated)
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      AILAB_SUBMODULE_TOKEN:
+        required: false
     inputs:
       build_run_id:
         description: "Run ID of the build workflow (for cross-run artifact download). Empty = same run."
@@ -84,6 +87,7 @@ jobs:
         with:
           ref: ${{ inputs.head_sha || github.sha }}
           repository: ${{github.repository}}
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
           persist-credentials: false
 

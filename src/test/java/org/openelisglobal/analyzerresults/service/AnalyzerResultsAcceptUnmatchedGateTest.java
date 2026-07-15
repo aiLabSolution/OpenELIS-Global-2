@@ -9,15 +9,23 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import javax.sql.DataSource;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
+import org.openelisglobal.analysis.service.AnalysisService;
+import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
+import org.openelisglobal.patient.util.PatientUtil;
 import org.openelisglobal.patient.valueholder.Patient;
+import org.openelisglobal.result.service.ResultService;
+import org.openelisglobal.result.valueholder.Result;
 import org.openelisglobal.sample.service.SampleService;
 import org.openelisglobal.sample.valueholder.Sample;
 import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * LIS-126: patient-safety coverage for the unmatched-sample accept gate.
@@ -50,10 +58,26 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
     @Autowired
     private SampleHumanService sampleHumanService;
 
+    @Autowired
+    private AnalysisService analysisService;
+
+    @Autowired
+    private ResultService resultService;
+
+    @Autowired
+    private DataSource dataSource;
+
     @Before
     public void setUp() throws Exception {
         super.setUp();
         executeDataSetWithStateManagement("testdata/analyzer-results-unmatched.xml");
+        PatientUtil.invalidateUnknownPatients();
+        PatientUtil.getUnknownPatient();
+    }
+
+    @After
+    public void tearDown() {
+        PatientUtil.invalidateUnknownPatients();
     }
 
     private AnalyzerResultItem buildItem(String id, String result, String accessionNumber, int sampleGroupingNumber,
@@ -111,6 +135,28 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         assertNull("staging row must be consumed", analyzerResultsService.readAnalyzerResults("3010"));
         assertTrue("the explicit decision must be audit-noted on the result",
                 walkUp.getNote() != null && walkUp.getNote().contains("WALKUP01"));
+
+        Analysis analysis = analysisService.getAnalysisByAccessionAndTestId("WALKUP01", "4001").get(0);
+        List<Result> results = resultService.getResultsByAnalysis(analysis);
+        Result acceptedResult = results.get(results.size() - 1);
+        assertEquals("K", acceptedResult.getRawCode());
+        assertEquals("mmol/L", acceptedResult.getRawUnit());
+        assertEquals("2823-3", acceptedResult.getLoinc());
+        assertEquals("mmol/L", acceptedResult.getUcumValue());
+        assertEquals("NORMALIZED", acceptedResult.getStatus());
+
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        assertEquals("accept must append one immutable result version", Integer.valueOf(1),
+                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?", Integer.class,
+                        Long.valueOf(acceptedResult.getId())));
+        assertEquals("K",
+                jdbc.queryForObject(
+                        "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
+        assertEquals("NORMALIZED",
+                jdbc.queryForObject(
+                        "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
     }
 
     @Test
@@ -138,6 +184,29 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         acceptService.acceptAndPersist(new ArrayList<>(List.of(second)), TEST_SYS_USER_ID);
         assertNull("confirmed second accept must consume its staging row",
                 analyzerResultsService.readAnalyzerResults("3011"));
+
+        Analysis analysis = analysisService.getAnalysisByAccessionAndTestId("WALKUP01", "4001").get(0);
+        List<Result> results = resultService.getResultsByAnalysis(analysis);
+        Result updatedResult = results.get(results.size() - 1);
+        assertEquals("5.2", updatedResult.getValue());
+        assertEquals("K-SECOND", updatedResult.getRawCode());
+        assertEquals("mEq/L", updatedResult.getRawUnit());
+        assertEquals("2823-3", updatedResult.getLoinc());
+        assertNull(updatedResult.getUcumValue());
+        assertEquals("PARTIAL", updatedResult.getStatus());
+
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        assertEquals("the existing Result update must append version 2", Integer.valueOf(2),
+                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?", Integer.class,
+                        Long.valueOf(updatedResult.getId())));
+        assertEquals("K-SECOND",
+                jdbc.queryForObject(
+                        "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("PARTIAL",
+                jdbc.queryForObject(
+                        "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
     }
 
     @Test

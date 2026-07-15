@@ -2,6 +2,7 @@ package org.openelisglobal.analyzerresults.service;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -143,6 +144,11 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
                 original.getNote() != null && original.getNote().contains("4.1") && original.getNote().contains("7.1"));
         assertTrue("the correction row itself stays readOnly — it never becomes a second reportable row",
                 correction.isReadOnly());
+        assertEquals("selected correction raw code must follow its value", "K-CORRECTED", original.getRawCode());
+        assertEquals("selected correction raw unit must follow its value", "mEq/L", original.getRawUnit());
+        assertEquals("selected correction LOINC must follow its value", "2823-3", original.getLoinc());
+        assertNull("selected correction has no UCUM value", original.getUcumValue());
+        assertEquals("selected correction status must follow its value", "PARTIAL", original.getNormalizationStatus());
     }
 
     @Test
@@ -229,6 +235,24 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
 
         assertThrows("hydration must restore readOnly from the DB, still blocking accept",
                 UnresolvedCorrectionException.class, () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
+    }
+
+    @Test
+    public void clientPostedNormalizationProvenance_isOverwrittenByHydration() {
+        AnalyzerResultItem correction = correctionItem();
+        correction.setRawCode("FORGED");
+        correction.setRawUnit("FORGED");
+        correction.setLoinc("FORGED");
+        correction.setUcumValue("FORGED");
+        correction.setNormalizationStatus("FORGED");
+
+        acceptService.hydrateStagingFlags(List.of(correction));
+
+        assertEquals("K-CORRECTED", correction.getRawCode());
+        assertEquals("mEq/L", correction.getRawUnit());
+        assertEquals("2823-3", correction.getLoinc());
+        assertNull(correction.getUcumValue());
+        assertEquals("PARTIAL", correction.getNormalizationStatus());
     }
 
     @Test
