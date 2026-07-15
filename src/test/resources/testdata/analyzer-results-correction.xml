@@ -23,7 +23,9 @@
         units="mmol/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
         read_only="false" duplicate_id="1011" positive="false"
         complete_date="2025-07-01 08:00:00" test_result_type="N"
-        test_id="4001" />
+        test_id="4001" raw_code="K-ORIGINAL" raw_unit="mmol/L"
+        loinc="2823-3" ucum_value="mmol/L"
+        normalization_status="NORMALIZED" />
 
     <!-- id=1011: analyzer-sent correction (K+ 7.1), linked back to 1010 -->
     <analyzer_results id="1011" analyzer_id="2001"
@@ -31,7 +33,8 @@
         units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
         read_only="true" duplicate_id="1010" positive="false"
         complete_date="2025-07-02 08:00:00" test_result_type="N"
-        test_id="4001" />
+        test_id="4001" raw_code="K-CORRECTED" raw_unit="mEq/L"
+        loinc="2823-3" normalization_status="PARTIAL" />
 
     <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id) —
          must never be treated as a linked correction / must never block accept -->

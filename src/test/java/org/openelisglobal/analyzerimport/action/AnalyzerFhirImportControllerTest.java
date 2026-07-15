@@ -107,6 +107,7 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     public void importFhirBundle_ValidObservation_InsertsAnalyzerResults() throws Exception {
         String bundleJson = "{\n" + "  \"resourceType\": \"Bundle\",\n" + "  \"type\": \"transaction\",\n"
                 + "  \"entry\": [\n" + "    {\n" + "      \"fullUrl\": \"urn:uuid:specimen-1\",\n"
@@ -121,7 +122,85 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.resultsInserted").value(1));
 
-        verify(analyzerResultsService).insertAnalyzerResults(anyList(), eq("1"));
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults rawOnly = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertEquals("WBC", rawOnly.getRawCode());
+        org.junit.Assert.assertNull(rawOnly.getLoinc());
+        org.junit.Assert.assertNull(rawOnly.getRawUnit());
+        org.junit.Assert.assertNull(rawOnly.getUcumValue());
+        org.junit.Assert.assertEquals("UNMAPPED", rawOnly.getNormalizationStatus());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_DualCodedQuantity_PreservesProvenanceIndependentOfCodingOrder() throws Exception {
+        org.openelisglobal.test.valueholder.Test whiteBloodCell = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(whiteBloodCell.getId()).thenReturn("55");
+        when(testService.getTestsByLoincCode("6690-2")).thenReturn(List.of(whiteBloodCell));
+
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"LIS-133\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":["
+                + "{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"},{\"code\":\"WBC\"}]},"
+                + "\"valueQuantity\":{\"value\":7.5,\"unit\":\"10^9/L\","
+                + "\"system\":\"http://unitsofmeasure.org\",\"code\":\"10*9/L\"}}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":["
+                + "{\"code\":\"WBC\"},{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"}]},"
+                + "\"valueQuantity\":{\"value\":8.0,\"unit\":\"10^9/L\","
+                + "\"system\":\"http://unitsofmeasure.org\",\"code\":\"10*9/L\"}}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(2));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
+        org.junit.Assert.assertEquals(2, inserted.size());
+        for (AnalyzerResults staged : inserted) {
+            org.junit.Assert.assertEquals("55", staged.getTestId());
+            org.junit.Assert.assertEquals("WBC", staged.getRawCode());
+            org.junit.Assert.assertEquals("10^9/L", staged.getRawUnit());
+            org.junit.Assert.assertEquals("6690-2", staged.getLoinc());
+            org.junit.Assert.assertEquals("10*9/L", staged.getUcumValue());
+            org.junit.Assert.assertEquals("NORMALIZED", staged.getNormalizationStatus());
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_DualCodedTextResult_IsPartialWithoutUcum() throws Exception {
+        org.openelisglobal.test.valueholder.Test whiteBloodCell = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(whiteBloodCell.getId()).thenReturn("55");
+        when(testService.getTestsByLoincCode("6690-2")).thenReturn(List.of(whiteBloodCell));
+
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"LIS-133-TEXT\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"},"
+                + "{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"}]},"
+                + "\"valueString\":\"Detected\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertEquals("WBC", staged.getRawCode());
+        org.junit.Assert.assertEquals("6690-2", staged.getLoinc());
+        org.junit.Assert.assertNull(staged.getRawUnit());
+        org.junit.Assert.assertNull(staged.getUcumValue());
+        org.junit.Assert.assertEquals("PARTIAL", staged.getNormalizationStatus());
     }
 
     /**
