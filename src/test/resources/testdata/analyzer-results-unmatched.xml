@@ -1,9 +1,9 @@
 <dataset>
-    <!-- LIS-126: unmatched-sample accept-gate fixtures. Test 4001 and
-         analyzer 2001 are copied verbatim from analyzer-results.xml so the
-         analyzer_results FKs resolve. The type_of_sample/sampletype_test
-         rows let the confirmed-accept tests run the full persist path
-         (getTypeOfSampleId indexes the first mapping for the test). -->
+    <!-- LIS-126: unmatched-sample accept-gate fixtures. Test 4001 and analyzer
+        2001 are copied verbatim from analyzer-results.xml so the analyzer_results
+        FKs resolve. The type_of_sample/sampletype_test rows let the confirmed-accept
+        tests run the full persist path (getTypeOfSampleId indexes the first mapping
+        for the test). -->
     <localization id="9301" description="Whole Blood" />
 
     <test id="4001" description="Blood Test" loinc="123456"
@@ -22,45 +22,42 @@
         has_setup_page="true" last_updated="2023-01-01 12:00:00" />
 
     <type_of_sample id="9310" description="Whole Blood"
-        domain="H" name_localization_id="9301" lastupdated="2023-12-01 12:00:00" />
+        domain="H" name_localization_id="9301"
+        lastupdated="2023-12-01 12:00:00" />
 
-    <sampletype_test id="9320" sample_type_id="9310" test_id="4001" />
+    <sampletype_test id="9320" sample_type_id="9310"
+        test_id="4001" />
 
-    <!-- id=3010: walk-up analyzer result. The bridge filled the accession
-         slot with the patient MRN (HL7ResultParser PID-3/PID-2 fallback) —
-         no LIS order exists for it. -->
+    <!-- id=3010: walk-up analyzer result. The bridge filled the accession slot
+        with the patient MRN (HL7ResultParser PID-3/PID-2 fallback) — no LIS order
+        exists for it. -->
     <analyzer_results id="3010" analyzer_id="2001"
         accession_number="WALKUP01" test_name="Potassium" result="4.1"
         units="mmol/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
-        read_only="false" positive="false"
-        complete_date="2025-07-01 08:00:00" test_result_type="N"
-        test_id="4001" raw_code="K" raw_unit="mmol/L"
-        loinc="2823-3" ucum_value="mmol/L"
-        normalization_status="NORMALIZED" />
+        read_only="false" positive="false" complete_date="2025-07-01 08:00:00"
+        test_result_type="N" test_id="4001" raw_code="K" raw_unit="mmol/L"
+        loinc="2823-3" ucum_value="mmol/L" normalization_status="NORMALIZED" />
 
-    <!-- id=3011: a second walk-up arrival for the same MRN-accession,
-         staged after the first was accepted (find-or-attach leg). -->
+    <!-- id=3011: a second walk-up arrival for the same MRN-accession, staged
+        after the first was accepted (find-or-attach leg). -->
     <analyzer_results id="3011" analyzer_id="2001"
         accession_number="WALKUP01" test_name="Potassium" result="5.2"
         units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
-        read_only="false" positive="false"
-        complete_date="2025-07-02 08:00:00" test_result_type="N"
-        test_id="4001" raw_code="K-SECOND" raw_unit="mEq/L"
-        loinc="2823-3" normalization_status="PARTIAL" />
+        read_only="false" positive="false" complete_date="2025-07-02 08:00:00"
+        test_result_type="N" test_id="4001" raw_code="K-SECOND"
+        raw_unit="mEq/L" loinc="2823-3" normalization_status="PARTIAL" />
 
-    <!-- id=3020: QC result — control accessions never have an order, so
-         control groups must stay exempt from the gate. -->
+    <!-- id=3020: QC result — control accessions never have an order, so control
+        groups must stay exempt from the gate. -->
     <analyzer_results id="3020" analyzer_id="2001"
         accession_number="QC-LOT-7" test_name="Potassium" result="4.0"
         units="mmol/L" iscontrol="true" last_updated="2025-07-01 08:00:00"
-        read_only="false" positive="false"
-        complete_date="2025-07-01 08:00:00" test_result_type="N"
-        test_id="4001" />
+        read_only="false" positive="false" complete_date="2025-07-01 08:00:00"
+        test_result_type="N" test_id="4001" />
 
     <!-- Status reference rows so the confirmed-accept tests can run the full
-         persist path: StatusService maps these by NAME + STATUS_TYPE
-         (buildStatusToIdMaps), and BaseWebContextSensitiveTest refreshes the
-         cache after every dataset load. -->
+        persist path: StatusService maps these by NAME + STATUS_TYPE (buildStatusToIdMaps),
+        and BaseWebContextSensitiveTest refreshes the cache after every dataset load. -->
     <status_of_sample id="941"
         description="Testing Started" code="41" status_type="ORDER"
         lastupdated="2025-03-18" name="Testing Started"
@@ -78,23 +75,20 @@
         lastupdated="2025-03-18" name="Technical Rejected"
         display_key="status_tech_reject" is_active="Y" />
 
-    <!-- Record-status machinery: persistRecordStatusForSample writes
-         ObservationHistory rows typed SampleRecordStatus/PatientRecordStatus
-         whose value is the REC_STATUS dictionary id for NotRegistered
-         ("Not Start" local abbreviation) — and the second-arrival gate test
-         reads them back through getStatusSetForAccessionNumber. -->
+    <!-- Record-status machinery: persistRecordStatusForSample writes ObservationHistory
+        rows typed SampleRecordStatus/PatientRecordStatus whose value is the REC_STATUS
+        dictionary id for NotRegistered ("Not Start" local abbreviation) — and the
+        second-arrival gate test reads them back through getStatusSetForAccessionNumber. -->
     <observation_history_type id="951"
-        type_name="SampleRecordStatus"
-        description="Sample record status"
+        type_name="SampleRecordStatus" description="Sample record status"
         lastupdated="2025-03-18" />
     <observation_history_type id="952"
-        type_name="PatientRecordStatus"
-        description="Patient record status"
+        type_name="PatientRecordStatus" description="Patient record status"
         lastupdated="2025-03-18" />
 
     <dictionary_category id="961"
-        description="Record status" local_Abbrev="RECST"
-        name="REC_STATUS" lastUpdated="2025-03-18 12:00:00" />
+        description="Record status" local_Abbrev="RECST" name="REC_STATUS"
+        lastUpdated="2025-03-18 12:00:00" />
     <dictionary id="962" is_active="Y"
         dict_entry="Not Registered" local_Abbrev="Not Start"
         dictionary_category_id="961" sort_order="1"

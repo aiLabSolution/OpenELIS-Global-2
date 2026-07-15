@@ -10,12 +10,14 @@ import static org.junit.Assert.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import javax.sql.DataSource;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
+import org.openelisglobal.patient.util.PatientUtil;
 import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.result.service.ResultService;
 import org.openelisglobal.result.valueholder.Result;
@@ -69,6 +71,13 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
     public void setUp() throws Exception {
         super.setUp();
         executeDataSetWithStateManagement("testdata/analyzer-results-unmatched.xml");
+        PatientUtil.invalidateUnknownPatients();
+        PatientUtil.getUnknownPatient();
+    }
+
+    @After
+    public void tearDown() {
+        PatientUtil.invalidateUnknownPatients();
     }
 
     private AnalyzerResultItem buildItem(String id, String result, String accessionNumber, int sampleGroupingNumber,
@@ -138,14 +147,16 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("accept must append one immutable result version", Integer.valueOf(1),
-                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?",
-                        Integer.class, Long.valueOf(acceptedResult.getId())));
-        assertEquals("K", jdbc.queryForObject(
-                "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
-                String.class, Long.valueOf(acceptedResult.getId())));
-        assertEquals("NORMALIZED", jdbc.queryForObject(
-                "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
-                String.class, Long.valueOf(acceptedResult.getId())));
+                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?", Integer.class,
+                        Long.valueOf(acceptedResult.getId())));
+        assertEquals("K",
+                jdbc.queryForObject(
+                        "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
+        assertEquals("NORMALIZED",
+                jdbc.queryForObject(
+                        "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
     }
 
     @Test
@@ -186,14 +197,16 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("the existing Result update must append version 2", Integer.valueOf(2),
-                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?",
-                        Integer.class, Long.valueOf(updatedResult.getId())));
-        assertEquals("K-SECOND", jdbc.queryForObject(
-                "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
-                String.class, Long.valueOf(updatedResult.getId())));
-        assertEquals("PARTIAL", jdbc.queryForObject(
-                "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
-                String.class, Long.valueOf(updatedResult.getId())));
+                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?", Integer.class,
+                        Long.valueOf(updatedResult.getId())));
+        assertEquals("K-SECOND",
+                jdbc.queryForObject(
+                        "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("PARTIAL",
+                jdbc.queryForObject(
+                        "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
     }
 
     @Test

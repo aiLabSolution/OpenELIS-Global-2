@@ -223,6 +223,10 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         item.setIsControl(false);
         item.setTestResultType("N");
         item.setAnalyzerId(ANALYZER_ID);
+        // These synthetic accessions intentionally have no pre-existing order.
+        // LIS-126 requires the technician's explicit confirmation before such
+        // analyzer results may be committed under the unidentified patient.
+        item.setUnmatchedAction("ACCEPT_UNKNOWN");
         // Analysis.setCompletedDateForDisplay parses the configured display
         // format: the test DB seeds default date locale fr-FR, whose
         // date.format.formatKey is dd/MM/yyyy

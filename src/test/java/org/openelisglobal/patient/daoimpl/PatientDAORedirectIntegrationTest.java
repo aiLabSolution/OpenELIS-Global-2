@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import javax.sql.DataSource;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
@@ -14,6 +15,7 @@ import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.person.service.PersonService;
 import org.openelisglobal.person.valueholder.Person;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Integration tests for redirect-on-lookup pattern (interim solution for
@@ -31,6 +33,9 @@ public class PatientDAORedirectIntegrationTest extends BaseWebContextSensitiveTe
     @Autowired
     private PersonService personService;
 
+    @Autowired
+    private DataSource dataSource;
+
     private Patient primaryPatient;
     private Patient mergedPatient;
     private Person primaryPerson;
@@ -39,6 +44,11 @@ public class PatientDAORedirectIntegrationTest extends BaseWebContextSensitiveTe
     @Before
     public void setUp() throws Exception {
         ensureReferenceTables("PERSON", "PATIENT");
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute(
+                "SELECT setval('clinlims.person_seq', CAST(COALESCE((SELECT MAX(id) FROM clinlims.person), 0) + 1 AS BIGINT), false)");
+        jdbc.execute(
+                "SELECT setval('clinlims.patient_seq', CAST(COALESCE((SELECT MAX(id) FROM clinlims.patient), 0) + 1 AS BIGINT), false)");
         // Create persons for test patients
         primaryPerson = new Person();
         primaryPerson.setFirstName("John");
