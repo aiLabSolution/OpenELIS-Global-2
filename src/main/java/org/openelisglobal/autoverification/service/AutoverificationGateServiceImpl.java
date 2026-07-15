@@ -1,5 +1,7 @@
 package org.openelisglobal.autoverification.service;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -101,6 +103,9 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     @Autowired
     private IStatusService statusService;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     /** Per-analysis evaluation: hold reasons plus honest pass-leg records. */
     private static final class GateEvaluation {
         final List<String> holdReasons = new ArrayList<>();
@@ -117,8 +122,24 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
         String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
 
         for (Map.Entry<String, List<Result>> entry : pairByAnalysisId(sampleGroupings).entrySet()) {
-            Analysis analysis = analysisService.get(entry.getKey());
-            if (analysis == null || !technicalAcceptanceId.equals(analysis.getStatusId())) {
+            Analysis analysis;
+            try {
+                analysis = analysisService.get(entry.getKey());
+            } catch (RuntimeException e) {
+                // per-analysis granularity: one unloadable analysis must not
+                // abort the rest of the batch (fail-safe — it simply stays in
+                // the human validation queue)
+                LogEvent.logError(getClass().getSimpleName(), "evaluateAndFinalize", "Cannot load analysis "
+                        + entry.getKey() + " — leaving it for human validation: " + e.getMessage());
+                continue;
+            }
+            // Detach from the Hibernate session BEFORE mutating so
+            // AuditableBaseObjectServiceImpl.update() loads a clean "old" copy
+            // for the audit-trail diff — a managed instance would be compared
+            // against itself and the Finalized transition would never reach
+            // the history table (same idiom as SampleEditServiceImpl).
+            entityManager.detach(analysis);
+            if (!technicalAcceptanceId.equals(analysis.getStatusId())) {
                 continue;
             }
 

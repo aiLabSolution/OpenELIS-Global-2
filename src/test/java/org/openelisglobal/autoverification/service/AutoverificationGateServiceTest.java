@@ -68,6 +68,7 @@ public class AutoverificationGateServiceTest {
     private QCResultDAO qcResultDAO;
     private DeltaCheckService deltaCheckService;
     private IStatusService statusService;
+    private jakarta.persistence.EntityManager entityManager;
 
     private AutowireCapableBeanFactory previousFactory;
     private Object previousMessageUtilInstance;
@@ -103,6 +104,7 @@ public class AutoverificationGateServiceTest {
         qcResultDAO = mock(QCResultDAO.class);
         deltaCheckService = mock(DeltaCheckService.class);
         statusService = mock(IStatusService.class);
+        entityManager = mock(jakarta.persistence.EntityManager.class);
 
         inject("analysisService", analysisService);
         inject("noteService", noteService);
@@ -110,6 +112,7 @@ public class AutoverificationGateServiceTest {
         inject("qcResultDAO", qcResultDAO);
         inject("deltaCheckService", deltaCheckService);
         inject("statusService", statusService);
+        inject("entityManager", entityManager);
         inject("enabled", true);
 
         when(statusService.getStatusID(AnalysisStatus.TechnicalAcceptance)).thenReturn(TA_STATUS_ID);
@@ -387,6 +390,49 @@ public class AutoverificationGateServiceTest {
         assertEquals("one bad result must hold the whole analysis", TA_STATUS_ID, first.getStatusId());
         verify(analysisService, never()).update(any());
         verify(noteService).createSavableNote(any(), any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    public void analysisIsDetachedBeforeMutation_soAuditDiffSeesTheTransition() {
+        // AuditableBaseObjectServiceImpl.update() diffs the entity against a
+        // freshly loaded "old" copy; a still-managed instance is compared
+        // against itself (Hibernate L1 cache) and the Finalized transition
+        // never reaches the history table. The harness mocks
+        // AuditTrailService, so this is the only guard: detach must happen
+        // while the entity still holds its PRE-mutation state, before update.
+        Analysis analysis = analysis("100");
+        List<String> statusAtDetach = new ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            statusAtDetach.add(((Analysis) inv.getArgument(0)).getStatusId());
+            return null;
+        }).when(entityManager).detach(any(Analysis.class));
+
+        gate.evaluateAndFinalize(grouping(analysis, numericResult("50", 40.0, 60.0)), "7");
+
+        assertEquals(FINALIZED_STATUS_ID, analysis.getStatusId());
+        assertEquals("detach must be called exactly once for the analysis", 1, statusAtDetach.size());
+        assertEquals("detach must happen while the entity still holds its pre-mutation status", TA_STATUS_ID,
+                statusAtDetach.get(0));
+        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(entityManager, analysisService);
+        inOrder.verify(entityManager).detach(analysis);
+        inOrder.verify(analysisService).update(analysis);
+    }
+
+    @Test
+    public void oneUnloadableAnalysis_doesNotAbortTheRestOfTheBatch() {
+        Analysis good = analysis("100");
+        Analysis missing = analysis("200");
+        when(analysisService.get("200")).thenThrow(new RuntimeException("ObjectNotFound"));
+
+        SampleGrouping grouping = new SampleGrouping();
+        grouping.analysisList = new ArrayList<>(List.of(missing, good));
+        grouping.resultList = new ArrayList<>(
+                List.of(numericResult("50", 40.0, 60.0), numericResult("50", 40.0, 60.0)));
+
+        gate.evaluateAndFinalize(List.of(grouping), "7");
+
+        assertEquals("the loadable analysis must still be decided", FINALIZED_STATUS_ID, good.getStatusId());
+        verify(analysisService).update(good);
     }
 
     @Test
