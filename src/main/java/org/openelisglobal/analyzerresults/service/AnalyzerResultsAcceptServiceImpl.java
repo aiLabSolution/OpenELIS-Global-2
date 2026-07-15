@@ -249,10 +249,10 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
      * Re-reads the persisted staging row for every actionable item and overwrites
      * trust-sensitive flags and all normalization provenance from the database. The
      * REST accept path replaces cached items wholesale from the client POST
-     * ({@code AnalyzerResultsPaging.updateCache}), so a posted item cannot be trusted
-     * to still reflect the staging row it was rendered from — a tampered or stale
-     * post must not be able to turn a linked correction into an ordinary editable
-     * row or forge clinical provenance.
+     * ({@code AnalyzerResultsPaging.updateCache}), so a posted item cannot be
+     * trusted to still reflect the staging row it was rendered from — a tampered or
+     * stale post must not be able to turn a linked correction into an ordinary
+     * editable row or forge clinical provenance.
      */
     void hydrateStagingFlags(List<AnalyzerResultItem> items) {
         for (AnalyzerResultItem item : items) {

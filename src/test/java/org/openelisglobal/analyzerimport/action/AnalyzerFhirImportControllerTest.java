@@ -144,14 +144,12 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
                 + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
                 + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"LIS-133\"}]}},"
                 + "{\"resource\":{\"resourceType\":\"Observation\","
-                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
-                + "\"code\":{\"coding\":["
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"}," + "\"code\":{\"coding\":["
                 + "{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"},{\"code\":\"WBC\"}]},"
                 + "\"valueQuantity\":{\"value\":7.5,\"unit\":\"10^9/L\","
                 + "\"system\":\"http://unitsofmeasure.org\",\"code\":\"10*9/L\"}}},"
                 + "{\"resource\":{\"resourceType\":\"Observation\","
-                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
-                + "\"code\":{\"coding\":["
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"}," + "\"code\":{\"coding\":["
                 + "{\"code\":\"WBC\"},{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"}]},"
                 + "\"valueQuantity\":{\"value\":8.0,\"unit\":\"10^9/L\","
                 + "\"system\":\"http://unitsofmeasure.org\",\"code\":\"10*9/L\"}}}]}";
@@ -185,10 +183,8 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
                 + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
                 + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"LIS-133-TEXT\"}]}},"
                 + "{\"resource\":{\"resourceType\":\"Observation\","
-                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
-                + "\"code\":{\"coding\":[{\"code\":\"WBC\"},"
-                + "{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"}]},"
-                + "\"valueString\":\"Detected\"}}]}";
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"}," + "\"code\":{\"coding\":[{\"code\":\"WBC\"},"
+                + "{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"}]}," + "\"valueString\":\"Detected\"}}]}";
 
         mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));

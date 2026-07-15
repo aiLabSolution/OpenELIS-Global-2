@@ -503,8 +503,8 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             return null;
         }
         return observation.getCode().getCoding().stream()
-                .filter(coding -> LOINC_SYSTEM.equals(coding.getSystem()) && coding.hasCode())
-                .map(Coding::getCode).filter(code -> code != null && !code.isBlank()).findFirst().orElse(null);
+                .filter(coding -> LOINC_SYSTEM.equals(coding.getSystem()) && coding.hasCode()).map(Coding::getCode)
+                .filter(code -> code != null && !code.isBlank()).findFirst().orElse(null);
     }
 
     private String findRawAnalyzerCode(Observation observation) {

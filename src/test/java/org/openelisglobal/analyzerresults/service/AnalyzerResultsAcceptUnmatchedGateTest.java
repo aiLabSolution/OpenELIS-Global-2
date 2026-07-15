@@ -147,14 +147,16 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("accept must append one immutable result version", Integer.valueOf(1),
-                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?",
-                        Integer.class, Long.valueOf(acceptedResult.getId())));
-        assertEquals("K", jdbc.queryForObject(
-                "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
-                String.class, Long.valueOf(acceptedResult.getId())));
-        assertEquals("NORMALIZED", jdbc.queryForObject(
-                "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
-                String.class, Long.valueOf(acceptedResult.getId())));
+                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?", Integer.class,
+                        Long.valueOf(acceptedResult.getId())));
+        assertEquals("K",
+                jdbc.queryForObject(
+                        "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
+        assertEquals("NORMALIZED",
+                jdbc.queryForObject(
+                        "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
     }
 
     @Test
@@ -195,14 +197,16 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("the existing Result update must append version 2", Integer.valueOf(2),
-                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?",
-                        Integer.class, Long.valueOf(updatedResult.getId())));
-        assertEquals("K-SECOND", jdbc.queryForObject(
-                "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
-                String.class, Long.valueOf(updatedResult.getId())));
-        assertEquals("PARTIAL", jdbc.queryForObject(
-                "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
-                String.class, Long.valueOf(updatedResult.getId())));
+                jdbc.queryForObject("SELECT count(*) FROM clinlims.result_version WHERE result_id = ?", Integer.class,
+                        Long.valueOf(updatedResult.getId())));
+        assertEquals("K-SECOND",
+                jdbc.queryForObject(
+                        "SELECT raw_code FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("PARTIAL",
+                jdbc.queryForObject(
+                        "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
     }
 
     @Test

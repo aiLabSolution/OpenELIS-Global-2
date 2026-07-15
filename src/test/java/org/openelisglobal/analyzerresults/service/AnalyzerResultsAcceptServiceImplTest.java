@@ -148,8 +148,7 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
         assertEquals("selected correction raw unit must follow its value", "mEq/L", original.getRawUnit());
         assertEquals("selected correction LOINC must follow its value", "2823-3", original.getLoinc());
         assertNull("selected correction has no UCUM value", original.getUcumValue());
-        assertEquals("selected correction status must follow its value", "PARTIAL",
-                original.getNormalizationStatus());
+        assertEquals("selected correction status must follow its value", "PARTIAL", original.getNormalizationStatus());
     }
 
     @Test
