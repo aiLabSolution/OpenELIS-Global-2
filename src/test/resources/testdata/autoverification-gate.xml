@@ -118,4 +118,14 @@
         read_only="false" positive="false"
         complete_date="2026-07-15 08:30:00" test_result_type="N"
         test_id="7810" />
+
+    <!-- AVGT500: accepted against a PRE-EXISTING ordered sample+analysis (the
+         pilot's primary workflow); the sample/analysis rows are seeded via SQL
+         in the test because their status_id FKs use the ensured status rows -->
+    <analyzer_results id="7857" analyzer_id="7801"
+        accession_number="AVGT500" test_name="Potassium AVG" result="50"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false"
+        complete_date="2026-07-15 08:30:00" test_result_type="N"
+        test_id="7810" />
 </dataset>

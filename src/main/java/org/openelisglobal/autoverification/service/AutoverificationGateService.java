@@ -10,10 +10,12 @@ import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
  * Composes reference-range gating, Westgard QC-run status (LIS-52) and the
  * delta check ({@link DeltaCheckService}, LIS-54) into a single autorelease
  * decision for analyzer results that have just been accepted. An analysis
- * auto-finalizes (statusId = Finalized + releasedDate, the same transition the
- * human result-validation path performs) only if every leg passes; any failure
- * leaves it at TechnicalAcceptance — the normal human-validation queue — with
- * the hold reason recorded as an internal Note.
+ * auto-finalizes (statusId = Finalized + releasedDate — the same status
+ * transition the human result-validation path performs, though its release side
+ * effects like FHIR export and notifications are LIS-226's scope and gate flag
+ * enablement) only if every leg passes; any failure leaves it at
+ * TechnicalAcceptance — the normal human-validation queue — with the hold
+ * reason recorded as an internal Note.
  */
 public interface AutoverificationGateService {
 

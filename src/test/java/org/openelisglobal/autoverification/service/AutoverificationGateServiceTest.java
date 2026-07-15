@@ -32,7 +32,9 @@ import org.openelisglobal.internationalization.MessageUtil;
 import org.openelisglobal.note.service.NoteService;
 import org.openelisglobal.note.service.NoteServiceImpl.NoteType;
 import org.openelisglobal.note.valueholder.Note;
+import org.openelisglobal.qc.dao.QCResultDAO;
 import org.openelisglobal.qc.service.QCRuleViolationService;
+import org.openelisglobal.qc.valueholder.QCResult;
 import org.openelisglobal.qc.valueholder.QCRuleViolation;
 import org.openelisglobal.result.valueholder.Result;
 import org.openelisglobal.spring.util.SpringContext;
@@ -63,6 +65,7 @@ public class AutoverificationGateServiceTest {
     private AnalysisService analysisService;
     private NoteService noteService;
     private QCRuleViolationService qcRuleViolationService;
+    private QCResultDAO qcResultDAO;
     private DeltaCheckService deltaCheckService;
     private IStatusService statusService;
 
@@ -97,12 +100,14 @@ public class AutoverificationGateServiceTest {
         analysisService = mock(AnalysisService.class);
         noteService = mock(NoteService.class);
         qcRuleViolationService = mock(QCRuleViolationService.class);
+        qcResultDAO = mock(QCResultDAO.class);
         deltaCheckService = mock(DeltaCheckService.class);
         statusService = mock(IStatusService.class);
 
         inject("analysisService", analysisService);
         inject("noteService", noteService);
         inject("qcRuleViolationService", qcRuleViolationService);
+        inject("qcResultDAO", qcResultDAO);
         inject("deltaCheckService", deltaCheckService);
         inject("statusService", statusService);
         inject("enabled", true);
@@ -110,6 +115,7 @@ public class AutoverificationGateServiceTest {
         when(statusService.getStatusID(AnalysisStatus.TechnicalAcceptance)).thenReturn(TA_STATUS_ID);
         when(statusService.getStatusID(AnalysisStatus.Finalized)).thenReturn(FINALIZED_STATUS_ID);
         when(qcRuleViolationService.findActiveRejections(anyString(), anyString())).thenReturn(Collections.emptyList());
+        when(qcResultDAO.findPendingByInstrumentAndTest(anyString(), anyString())).thenReturn(Collections.emptyList());
         when(deltaCheckService.evaluate(any(), any())).thenReturn(DeltaCheckVerdict.notEvaluable("not installed"));
         when(noteService.createSavableNote(any(), any(), anyString(), anyString(), anyString())).thenAnswer(inv -> {
             Note note = new Note();
@@ -138,6 +144,9 @@ public class AutoverificationGateServiceTest {
         org.openelisglobal.test.valueholder.Test test = new org.openelisglobal.test.valueholder.Test();
         test.setId(TEST_ID);
         analysis.setTest(test);
+        // the gate re-loads each analysis by id inside its transaction (the
+        // grouping copies are detached with a stale @Version)
+        when(analysisService.get(id)).thenReturn(analysis);
         return analysis;
     }
 
@@ -304,6 +313,90 @@ public class AutoverificationGateServiceTest {
         gate.evaluateAndFinalize(grouping(analysis, numericResult("QNS", 40.0, 60.0)), "7");
         assertEquals(TA_STATUS_ID, analysis.getStatusId());
         assertTrue(heldReason().contains("cannot be evaluated"));
+    }
+
+    @Test
+    public void nanValue_holdsFailClosed() {
+        // Double.parseDouble("NaN") succeeds and NaN comparisons are all false
+        // — without an explicit finiteness guard this auto-released (review
+        // P1). Must hold.
+        Analysis analysis = analysis("100");
+        gate.evaluateAndFinalize(grouping(analysis, numericResult("NaN", 40.0, 60.0)), "7");
+        assertEquals(TA_STATUS_ID, analysis.getStatusId());
+        verify(analysisService, never()).update(any());
+        assertTrue(heldReason().contains("non-finite"));
+    }
+
+    @Test
+    public void infinityValue_holdsFailClosed_evenWithUnconfiguredRange() {
+        Analysis analysis = analysis("100");
+        gate.evaluateAndFinalize(
+                grouping(analysis, numericResult("Infinity", Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY)), "7");
+        assertEquals(TA_STATUS_ID, analysis.getStatusId());
+        assertTrue(heldReason().contains("non-finite"));
+    }
+
+    @Test
+    public void pendingQcEvaluation_holdsFailClosed() {
+        // a QC run whose async Westgard evaluation has not finished is not yet
+        // known to be in control — the gate must not release against it
+        when(qcResultDAO.findPendingByInstrumentAndTest(ANALYZER_ID, TEST_ID)).thenReturn(List.of(new QCResult()));
+
+        Analysis analysis = analysis("100");
+        gate.evaluateAndFinalize(grouping(analysis, numericResult("50", 40.0, 60.0)), "7");
+
+        assertEquals(TA_STATUS_ID, analysis.getStatusId());
+        assertTrue(heldReason().contains("QC evaluation pending"));
+    }
+
+    @Test
+    public void autoVerifyNote_recordsActualLegOutcomes() {
+        // the release note must record what actually ran — not claim "delta
+        // check PASS" while the delta engine is not installed (review P2)
+        Analysis analysis = analysis("100");
+        gate.evaluateAndFinalize(grouping(analysis, numericResult("50", 40.0, 60.0)), "7");
+
+        String note = heldReason();
+        assertTrue("QC leg record expected, got: " + note, note.contains("QC: no active REJECTION violation"));
+        assertTrue("range leg record expected, got: " + note, note.contains("range: 50 within"));
+        assertTrue("delta leg must be recorded as not evaluable, got: " + note, note.contains("delta: not evaluable"));
+    }
+
+    @Test
+    public void sameAnalysisId_distinctDetachedInstances_decidedOnce() {
+        // the accept path materializes the same DB analysis as distinct
+        // detached instances — grouping must key on id, not object identity,
+        // or a passing duplicate copy could finalize a row whose other result
+        // failed a leg (review P2)
+        Analysis first = analysis("100");
+        Analysis second = new Analysis();
+        second.setId("100");
+        second.setStatusId(TA_STATUS_ID);
+        second.setAnalyzerId(ANALYZER_ID);
+        org.openelisglobal.test.valueholder.Test test = new org.openelisglobal.test.valueholder.Test();
+        test.setId(TEST_ID);
+        second.setTest(test);
+
+        SampleGrouping grouping = new SampleGrouping();
+        grouping.analysisList = new ArrayList<>(List.of(first, second));
+        grouping.resultList = new ArrayList<>(
+                List.of(numericResult("50", 40.0, 60.0), numericResult("75", 40.0, 60.0)));
+
+        gate.evaluateAndFinalize(List.of(grouping), "7");
+
+        assertEquals("one bad result must hold the whole analysis", TA_STATUS_ID, first.getStatusId());
+        verify(analysisService, never()).update(any());
+        verify(noteService).createSavableNote(any(), any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    public void unpersistedAnalysis_isSkippedNotFinalized() {
+        Analysis analysis = analysis("100");
+        analysis.setId(null);
+        gate.evaluateAndFinalize(grouping(analysis, numericResult("50", 40.0, 60.0)), "7");
+
+        verify(analysisService, never()).update(any());
+        verify(noteService, never()).createSavableNote(any(), any(), anyString(), anyString(), anyString());
     }
 
     @Test

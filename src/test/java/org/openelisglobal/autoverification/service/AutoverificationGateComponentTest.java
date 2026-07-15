@@ -19,6 +19,7 @@ import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsAcceptServiceImpl;
 import org.openelisglobal.common.services.IStatusService;
+import org.openelisglobal.common.services.StatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.qc.dao.QCResultDAO;
 import org.openelisglobal.qc.service.QCResultService;
@@ -112,6 +113,7 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         ensureStatusRow("7903", "793", "Technical Acceptance", "ANALYSIS");
         ensureStatusRow("7904", "794", "Technical Rejected", "ANALYSIS");
         ensureStatusRow("7905", "795", "Finalized", "ANALYSIS");
+        ensureStatusRow("7906", "796", "Not Tested", "ANALYSIS");
         statusService.refreshCache();
 
         // default limit (no gender, age 0..Infinity) so the accept path's
@@ -159,6 +161,39 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         jdbcTemplate.update("DELETE FROM clinlims.observation_history WHERE sample_id IN"
                 + " (SELECT id FROM clinlims.sample WHERE accession_number LIKE 'AVGT%')");
         jdbcTemplate.update("DELETE FROM clinlims.sample WHERE accession_number LIKE 'AVGT%'");
+        jdbcTemplate.update("DELETE FROM clinlims.patient WHERE id = 7861");
+        jdbcTemplate.update("DELETE FROM clinlims.person WHERE id = 7860");
+    }
+
+    /**
+     * Seed a pre-existing ORDERED sample with a NotStarted analysis for accession
+     * AVGT500 — the pilot's primary workflow, where the accept path UPDATES an
+     * existing analysis (bumping its @Version) instead of inserting a new one. Raw
+     * SQL because the status_id FKs use the ensured status rows, which do not exist
+     * yet at DBUnit fixture-load time.
+     */
+    private void seedOrderedSample() {
+        // resolve status ids through the (freshly refreshed) StatusService —
+        // in a standalone run the canonical seed rows exist with their own
+        // ids and the ensured 79xx rows were skipped
+        String startedId = statusService.getStatusID(StatusService.OrderStatus.Started);
+        String sampleEnteredId = statusService.getStatusID(StatusService.SampleStatus.Entered);
+        String notStartedId = statusService.getStatusID(AnalysisStatus.NotStarted);
+
+        jdbcTemplate.update("INSERT INTO clinlims.person (id, lastupdated) VALUES (7860, now())");
+        jdbcTemplate.update("INSERT INTO clinlims.patient (id, person_id, lastupdated) VALUES (7861, 7860, now())");
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.sample (id, accession_number, domain, status_id, entered_date,"
+                        + " received_date, lastupdated) VALUES (7862, 'AVGT500', 'H', ?::numeric, now(), now(), now())",
+                startedId);
+        jdbcTemplate.update("INSERT INTO clinlims.sample_human (id, samp_id, patient_id, lastupdated)"
+                + " VALUES (7863, 7862, 7861, now())");
+        jdbcTemplate.update("INSERT INTO clinlims.sample_item (id, samp_id, sort_order, typeosamp_id, status_id,"
+                + " lastupdated) VALUES (7864, 7862, 1, 7815, ?::numeric, now())", sampleEnteredId);
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.analysis (id, sampitem_id, test_id, status_id, analysis_type,"
+                        + " revision, lastupdated) VALUES (7865, 7864, 7810, ?::numeric, 'MANUAL', '1', now())",
+                notStartedId);
     }
 
     private void ensureStatusRow(String id, String code, String name, String statusType) {
@@ -337,6 +372,26 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         accept(item("7855", "AVGT300", "50", 1));
 
         assertAutoFinalized("AVGT300");
+    }
+
+    @Test
+    public void preExistingOrderedAnalysis_cleanResult_autoFinalizes() throws Exception {
+        // Regression for the adversarial-review P1: the accept path UPDATES a
+        // pre-existing ordered analysis (status NotStarted -> TA), bumping its
+        // @Version — a gate that merges the grouping's stale detached copy
+        // dies with StaleObjectStateException and silently releases nothing.
+        // The gate must re-load by id inside its own transaction.
+        seedOrderedSample();
+        runQC("102.0", "ACCEPTED");
+
+        accept(item("7857", "AVGT500", "50", 1));
+
+        Analysis analysis = findSingleAnalysis("AVGT500");
+        assertEquals("pre-existing ordered analysis must auto-finalize", finalizedId(), analysis.getStatusId());
+        assertNotNull(analysis.getReleasedDate());
+        List<String> notes = gateNotes(analysis);
+        assertEquals(1, notes.size());
+        assertTrue(notes.get(0).contains("Auto-verified by system"));
     }
 
     @Test
