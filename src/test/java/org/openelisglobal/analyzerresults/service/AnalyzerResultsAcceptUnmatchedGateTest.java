@@ -9,10 +9,12 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
+import org.openelisglobal.patient.util.PatientUtil;
 import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.sample.service.SampleService;
 import org.openelisglobal.sample.valueholder.Sample;
@@ -54,6 +56,13 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
     public void setUp() throws Exception {
         super.setUp();
         executeDataSetWithStateManagement("testdata/analyzer-results-unmatched.xml");
+        PatientUtil.invalidateUnknownPatients();
+        PatientUtil.getUnknownPatient();
+    }
+
+    @After
+    public void tearDown() {
+        PatientUtil.invalidateUnknownPatients();
     }
 
     private AnalyzerResultItem buildItem(String id, String result, String accessionNumber, int sampleGroupingNumber,
