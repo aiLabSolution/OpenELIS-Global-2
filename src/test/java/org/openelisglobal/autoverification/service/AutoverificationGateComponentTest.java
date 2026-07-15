@@ -100,6 +100,20 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     public void setUpGate() throws Exception {
         executeDataSetWithStateManagement("testdata/autoverification-gate.xml");
 
+        // Heal status_of_sample: executeDataSetWithStateManagement TRUNCATEs
+        // every table a dataset names and never restores, so any earlier test
+        // whose fixture declares status_of_sample (e.g. analyzer-results.xml)
+        // leaves it holding only that fixture's rows for the rest of the fork
+        // — and the accept path then resolves statuses to -1. Idempotently
+        // re-insert the canonical rows this flow needs (same pattern as
+        // ensureAuditSystemUser) and refresh the id cache.
+        ensureStatusRow("7901", "791", "Testing Started", "ORDER");
+        ensureStatusRow("7902", "792", "SampleEntered", "SAMPLE");
+        ensureStatusRow("7903", "793", "Technical Acceptance", "ANALYSIS");
+        ensureStatusRow("7904", "794", "Technical Rejected", "ANALYSIS");
+        ensureStatusRow("7905", "795", "Finalized", "ANALYSIS");
+        statusService.refreshCache();
+
         // default limit (no gender, age 0..Infinity) so the accept path's
         // unknown patient resolves it; normal range 40-60. Raw SQL because
         // ResultLimit.ageLimitsAreDefault() demands max_age = +Infinity, which
@@ -145,6 +159,14 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         jdbcTemplate.update("DELETE FROM clinlims.observation_history WHERE sample_id IN"
                 + " (SELECT id FROM clinlims.sample WHERE accession_number LIKE 'AVGT%')");
         jdbcTemplate.update("DELETE FROM clinlims.sample WHERE accession_number LIKE 'AVGT%'");
+    }
+
+    private void ensureStatusRow(String id, String code, String name, String statusType) {
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.status_of_sample (id, code, name, description, status_type, lastupdated)"
+                        + " SELECT ?::numeric, ?::numeric, ?, ?, ?, now() WHERE NOT EXISTS"
+                        + " (SELECT 1 FROM clinlims.status_of_sample WHERE name = ? AND status_type = ?)",
+                id, code, name, name, statusType, name, statusType);
     }
 
     // ---------------------------------------------------------------
