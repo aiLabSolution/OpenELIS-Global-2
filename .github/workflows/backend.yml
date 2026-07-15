@@ -73,6 +73,14 @@ jobs:
         with:
           repository: ${{github.repository}}
           submodules: recursive
+          # LIS-210: the `plugins` submodule points at the private
+          # aiLabSolution/openelisglobal-plugins fork, which the default
+          # GITHUB_TOKEN cannot read — a recursive clone dies with "repository
+          # not found" before anything compiles. AILAB_SUBMODULE_TOKEN has read
+          # access to the private fork(s); actions/checkout uses it to fetch every
+          # github.com submodule, so recursive checkout works even as all repos go
+          # private.
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
       - name: check formatting
         run: mvn spotless:check

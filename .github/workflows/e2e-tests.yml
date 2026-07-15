@@ -301,6 +301,9 @@ jobs:
         )
       )
     uses: ./.github/workflows/e2e-authoritative-reusable.yml
+    # LIS-210: pass AILAB_SUBMODULE_TOKEN into the whole e2e reusable chain so
+    # every recursive checkout can fetch the private plugins fork.
+    secrets: inherit
     permissions:
       contents: read
       packages: read

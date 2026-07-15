@@ -14,6 +14,10 @@ jobs:
         with:
           repository: ${{github.repository}}
           submodules: recursive
+          # LIS-210: credentialed submodule fetch for the private plugins fork.
+          # This reusable workflow must be called with `secrets: inherit` (or the
+          # token passed explicitly) for AILAB_SUBMODULE_TOKEN to resolve.
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
       - name: Build installer
         run: ./build.sh -ib develop

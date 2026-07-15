@@ -68,6 +68,9 @@ jobs:
   playwright-core:
     name: Playwright Core
     uses: ./.github/workflows/e2e-playwright-reusable.yml
+    # LIS-210: pass AILAB_SUBMODULE_TOKEN down so the reusable's recursive
+    # checkout can fetch the private plugins fork.
+    secrets: inherit
     permissions:
       contents: read
       packages: read
@@ -90,6 +93,8 @@ jobs:
     name: Playwright Harness
     if: inputs.include_plugin_jars == 'true'
     uses: ./.github/workflows/e2e-playwright-reusable.yml
+    # LIS-210: pass AILAB_SUBMODULE_TOKEN down for the private plugins fork.
+    secrets: inherit
     permissions:
       contents: read
       packages: read
@@ -110,6 +115,8 @@ jobs:
   cypress:
     name: Cypress
     uses: ./.github/workflows/e2e-cypress-deprecated.yml
+    # LIS-210: pass AILAB_SUBMODULE_TOKEN down for the private plugins fork.
+    secrets: inherit
     permissions:
       contents: read
       packages: read

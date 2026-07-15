@@ -34,6 +34,8 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           submodules: recursive
+          # LIS-210: private plugins fork needs a credentialed submodule fetch.
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
       - name: Gate on backend Checkpoint green
         if: ${{ inputs.require_green }}

@@ -134,6 +134,9 @@ jobs:
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
           submodules: recursive
+          # LIS-210: credentialed submodule fetch for the private plugins fork
+          # (inherited from the caller via secrets: inherit).
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
           persist-credentials: false
 
       - name: Configure swap for OOM resilience

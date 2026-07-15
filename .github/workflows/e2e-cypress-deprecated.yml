@@ -85,6 +85,9 @@ jobs:
           ref: ${{ inputs.head_sha || github.sha }}
           repository: ${{github.repository}}
           submodules: recursive
+          # LIS-210: credentialed submodule fetch for the private plugins fork
+          # (inherited from the caller via secrets: inherit).
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
           persist-credentials: false
 
       - name: Set up Node.js
