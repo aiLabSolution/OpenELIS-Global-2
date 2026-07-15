@@ -1,7 +1,9 @@
 <dataset>
-    <!-- LIS-158: linked-correction accept/resolve fixtures. Test 4001 and analyzer
-        2001 are copied verbatim from analyzer-results.xml so the analyzer_results
-        FKs resolve. -->
+    <!-- LIS-158: linked-correction accept/resolve fixtures. Test 4001 and
+         analyzer 2001 are copied verbatim from analyzer-results.xml so the
+         analyzer_results FKs resolve. -->
+    <localization id="9301" description="Whole Blood" />
+
     <test id="4001" description="Blood Test" loinc="123456"
         reporting_description="Complete Blood Count" sticker_req_flag="Y"
         is_active="Y" active_begin="2025-01-01 12:00:00"
@@ -17,6 +19,49 @@
         location="Main Laboratory - Room 101" is_active="true"
         has_setup_page="true" last_updated="2023-01-01 12:00:00" />
 
+    <!-- Reference rows (copied from analyzer-results-unmatched.xml, LIS-126
+         precedent) so full-path accept tests can run the persist leg: the
+         LIS-128 cross-day red-run must demonstrate accept PROCEEDING on
+         pre-fix code, not aborting on missing reference data. -->
+    <type_of_sample id="9310" description="Whole Blood"
+        domain="H" name_localization_id="9301" lastupdated="2023-12-01 12:00:00" />
+
+    <sampletype_test id="9320" sample_type_id="9310" test_id="4001" />
+
+    <status_of_sample id="941"
+        description="Testing Started" code="41" status_type="ORDER"
+        lastupdated="2025-03-18" name="Testing Started"
+        display_key="status_testing_started" is_active="Y" />
+    <status_of_sample id="942"
+        description="Sample Entered" code="42" status_type="SAMPLE"
+        lastupdated="2025-03-18" name="SampleEntered"
+        display_key="status_sample_entered" is_active="Y" />
+    <status_of_sample id="943"
+        description="Technical Acceptance" code="43" status_type="ANALYSIS"
+        lastupdated="2025-03-18" name="Technical Acceptance"
+        display_key="status_tech_accept" is_active="Y" />
+    <status_of_sample id="944"
+        description="Technical Rejected" code="44" status_type="ANALYSIS"
+        lastupdated="2025-03-18" name="Technical Rejected"
+        display_key="status_tech_reject" is_active="Y" />
+
+    <observation_history_type id="951"
+        type_name="SampleRecordStatus"
+        description="Sample record status"
+        lastupdated="2025-03-18" />
+    <observation_history_type id="952"
+        type_name="PatientRecordStatus"
+        description="Patient record status"
+        lastupdated="2025-03-18" />
+
+    <dictionary_category id="961"
+        description="Record status" local_Abbrev="RECST"
+        name="REC_STATUS" lastUpdated="2025-03-18 12:00:00" />
+    <dictionary id="962" is_active="Y"
+        dict_entry="Not Registered" local_Abbrev="Not Start"
+        dictionary_category_id="961" sort_order="1"
+        lastUpdated="2025-03-18 12:00:00" />
+
     <!-- id=1010: editable original (K+ 4.1) -->
     <analyzer_results id="1010" analyzer_id="2001"
         accession_number="CORR100" test_name="Potassium" result="4.1"
@@ -25,19 +70,59 @@
         complete_date="2025-07-01 08:00:00" test_result_type="N"
         test_id="4001" />
 
-    <!-- id=1011: analyzer-sent correction (K+ 7.1), linked back to 1010 -->
+    <!-- id=1011: analyzer-sent correction (K+ 7.1), linked back to 1010.
+         Same calendar day as 1010, later time — models a genuine analyzer
+         corrected re-export (LIS-128: legitimate same-day corrections must
+         still USE cleanly under the cross-day guard). -->
     <analyzer_results id="1011" analyzer_id="2001"
         accession_number="CORR100" test_name="Potassium" result="7.1"
         units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
         read_only="true" duplicate_id="1010" positive="false"
-        complete_date="2025-07-02 08:00:00" test_result_type="N"
+        complete_date="2025-07-01 14:00:00" test_result_type="N"
         test_id="4001" />
 
-    <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id)
-        — must never be treated as a linked correction / must never block accept -->
+    <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id) —
+         must never be treated as a linked correction / must never block accept -->
     <analyzer_results id="1012" analyzer_id="2001"
-        accession_number="MISS200" test_name="Unmapped" result="99" units=""
-        iscontrol="false" last_updated="2025-07-01 08:00:00" read_only="true"
-        positive="false" complete_date="2025-07-01 08:00:00"
-        test_result_type="N" />
+        accession_number="MISS200" test_name="Unmapped" result="99"
+        units="" iscontrol="false" last_updated="2025-07-01 08:00:00"
+        read_only="true" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N" />
+
+    <!-- id=1013/1014: LIS-128 reused-accession failure scenario — a
+         cross-day linked "correction" under one accession. Day-1 CRP=5
+         stages writable; day-2 CRP=40 (a different day's/patient's result
+         under the same reused accession number) stages as a linked
+         correction. USE must be refused fail-closed. -->
+    <analyzer_results id="1013" analyzer_id="2001"
+        accession_number="REUSE300" test_name="CRP" result="5"
+        units="mg/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
+        read_only="false" duplicate_id="1014" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N"
+        test_id="4001" />
+
+    <analyzer_results id="1014" analyzer_id="2001"
+        accession_number="REUSE300" test_name="CRP" result="40"
+        units="mg/L" iscontrol="false" last_updated="2025-07-02 08:15:00"
+        read_only="true" duplicate_id="1013" positive="false"
+        complete_date="2025-07-02 08:15:00" test_result_type="N"
+        test_id="4001" />
+
+    <!-- id=1015/1016: LIS-128 orphan-branch variant — the writable original
+         (1015) is UNMAPPED (no test_id), so hydration forces it readOnly and
+         findPartner cannot see it; the cross-day USE on 1016 lands in the
+         orphan branch and must still be refused via the
+         duplicateAnalyzerResultId backlink lookup. -->
+    <analyzer_results id="1015" analyzer_id="2001"
+        accession_number="REUSE400" test_name="HGB" result="12"
+        units="g/dL" iscontrol="false" last_updated="2025-07-01 09:00:00"
+        read_only="false" duplicate_id="1016" positive="false"
+        complete_date="2025-07-01 09:00:00" test_result_type="N" />
+
+    <analyzer_results id="1016" analyzer_id="2001"
+        accession_number="REUSE400" test_name="HGB" result="8"
+        units="g/dL" iscontrol="false" last_updated="2025-07-02 09:05:00"
+        read_only="true" duplicate_id="1015" positive="false"
+        complete_date="2025-07-02 09:05:00" test_result_type="N"
+        test_id="4001" />
 </dataset>
