@@ -260,6 +260,37 @@ const AnalyserResults = (props) => {
                     />
                   </picture>
                 )}
+                {row.unmatchedSample && (
+                  <div className="unmatchedSampleGate">
+                    {/* No order/sample matches this accession: the backend
+                        fail-closed blocks accept until the tech either edits
+                        the accession onto a real order or explicitly ticks
+                        this box (unmatchedAction=ACCEPT_UNKNOWN). */}
+                    <Checkbox
+                      id={"resultList" + row.id + ".unmatchedAction"}
+                      name={
+                        "resultList[?(@.id == " + row.id + ")].unmatchedAction"
+                      }
+                      labelText={intl.formatMessage({
+                        id: "analyzer.unmatched.accept.label",
+                      })}
+                      onChange={(e) =>
+                        handleChange(
+                          {
+                            target: {
+                              name:
+                                "resultList[?(@.id == " +
+                                row.id +
+                                ")].unmatchedAction",
+                              value: e.target.checked ? "ACCEPT_UNKNOWN" : "",
+                            },
+                          },
+                          row.id,
+                        )
+                      }
+                    />
+                  </div>
+                )}
               </>
             )}
           </>

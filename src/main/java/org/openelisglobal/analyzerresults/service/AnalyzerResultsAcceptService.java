@@ -23,4 +23,18 @@ public interface AnalyzerResultsAcceptService {
      * @param sysUserId  the authenticated user's system id
      */
     void acceptAndPersist(List<AnalyzerResultItem> allResults, String sysUserId);
+
+    /**
+     * Whether accepting results for this accession number would commit them under
+     * the shared unidentified-patient placeholder without any human-verified
+     * patient identity (LIS-126): either no sample entry has been done and no
+     * sample carries the accession (accept would mint a new Unknown-patient
+     * sample), or the only sample carrying it was itself created by a previous
+     * analyzer accept (both record statuses NotRegistered — accept would attach to
+     * it). Such groups require an explicit technician confirmation before accept.
+     *
+     * @param accessionNumber the group's accession number
+     * @return true when accept must be gated behind an explicit confirmation
+     */
+    boolean requiresUnmatchedConfirmation(String accessionNumber);
 }

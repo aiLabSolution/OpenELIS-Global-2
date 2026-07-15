@@ -22,6 +22,7 @@ import org.openelisglobal.analyzerresults.action.AnalyzerResultsPaging;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsAcceptService;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsService;
+import org.openelisglobal.analyzerresults.service.UnmatchedSampleException;
 import org.openelisglobal.analyzerresults.service.UnresolvedCorrectionException;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.openelisglobal.common.controller.BaseController;
@@ -86,7 +87,7 @@ public class AnalyzerResultsController extends BaseController {
             "resultList*.sampleGroupingNumber", "resultList*.readOnly", "resultList*.testResultType",
             "resultList*.testId", "resultList*.accessionNumber", "resultList*.isAccepted", "resultList*.isRejected",
             "resultList*.isDeleted", "resultList*.result", "resultList*.completeDate", "resultList*.note",
-            "resultList*.reflexSelectionId", "resultList*.correctionAction", };
+            "resultList*.reflexSelectionId", "resultList*.correctionAction", "resultList*.unmatchedAction", };
 
     private static final boolean IS_RETROCI = ConfigurationProperties.getInstance()
             .isPropertyValueEqual(ConfigurationProperties.Property.configurationName, "CI_GENERAL");
@@ -359,9 +360,15 @@ public class AnalyzerResultsController extends BaseController {
     private List<List<AnalyzerResultItem>> groupAnalyzerResults(List<AnalyzerResults> analyzerResultsList) {
         Map<String, Integer> accessionToAccessionGroupMap = new HashMap<>();
         List<List<AnalyzerResultItem>> accessionGroupedResultsList = new ArrayList<>();
+        // LIS-126: one status/sample lookup per accession, not per row
+        Map<String, Boolean> accessionToUnmatchedMap = new HashMap<>();
 
         for (AnalyzerResults analyzerResult : analyzerResultsList) {
             AnalyzerResultItem resultItem = analyzerResultsToAnalyzerResultItem(analyzerResult);
+            if (!resultItem.getIsControl()) {
+                resultItem.setUnmatchedSample(accessionToUnmatchedMap.computeIfAbsent(resultItem.getAccessionNumber(),
+                        acceptService::requiresUnmatchedConfirmation));
+            }
             Integer groupIndex = accessionToAccessionGroupMap.get(resultItem.getAccessionNumber());
             List<AnalyzerResultItem> group;
             if (groupIndex == null) {
@@ -758,7 +765,7 @@ public class AnalyzerResultsController extends BaseController {
             }
             acceptService.acceptAndPersist(resultItemList, getSysUserId(request));
 
-        } catch (UnresolvedCorrectionException e) {
+        } catch (UnresolvedCorrectionException | UnmatchedSampleException e) {
             LogEvent.logWarn(this.getClass().getSimpleName(), "showRestAnalyzerResultsSave", e.getMessage());
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             writeErrorResponse(response, e.getMessage());

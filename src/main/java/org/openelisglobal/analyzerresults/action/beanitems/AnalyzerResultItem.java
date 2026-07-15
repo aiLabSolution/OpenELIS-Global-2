@@ -82,6 +82,17 @@ public class AnalyzerResultItem implements Serializable {
     // there, not here.
     private String correctionAction;
 
+    // GET-time only: the group's accession resolves to no human-entered
+    // sample/patient, so accepting it requires an explicit technician
+    // confirmation (LIS-126). Recomputed server-side on accept — a posted
+    // value is never trusted (not in the controller's allowed fields).
+    private boolean unmatchedSample = false;
+
+    // Transient: technician's explicit confirmation to commit an unmatched
+    // group under the unidentified-patient placeholder ("ACCEPT_UNKNOWN").
+    // Consumed by AnalyzerResultsAcceptServiceImpl.gateUnmatchedSampleGroups.
+    private String unmatchedAction;
+
     @SafeHtml(level = SafeHtml.SafeListLevel.NONE, groups = { AnalyzerResultsForm.AnalyzerResuts.class })
     private String testResultType = "N";
 
@@ -310,6 +321,22 @@ public class AnalyzerResultItem implements Serializable {
 
     public String getCorrectionAction() {
         return correctionAction;
+    }
+
+    public void setUnmatchedSample(boolean unmatchedSample) {
+        this.unmatchedSample = unmatchedSample;
+    }
+
+    public boolean isUnmatchedSample() {
+        return unmatchedSample;
+    }
+
+    public void setUnmatchedAction(String unmatchedAction) {
+        this.unmatchedAction = unmatchedAction;
+    }
+
+    public String getUnmatchedAction() {
+        return unmatchedAction;
     }
 
     public void setTestResultType(String testResultType) {
