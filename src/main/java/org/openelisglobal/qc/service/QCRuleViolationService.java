@@ -107,11 +107,10 @@ public interface QCRuleViolationService {
     QCViolationForm toForm(QCRuleViolation violation);
 
     /**
-     * Get the REJECTION-severity violations for an (instrument, test) pair that
-     * are not yet RESOLVED — the violations that block autorelease of that
-     * instrument's patient results for that test (LIS-55). ACKNOWLEDGED
-     * violations are included: acknowledging an alert is not clearing the
-     * instrument.
+     * Get the REJECTION-severity violations for an (instrument, test) pair that are
+     * not yet RESOLVED — the violations that block autorelease of that instrument's
+     * patient results for that test (LIS-55). ACKNOWLEDGED violations are included:
+     * acknowledging an alert is not clearing the instrument.
      *
      * @param instrumentId The instrument (analyzer) ID
      * @param testId       The test ID

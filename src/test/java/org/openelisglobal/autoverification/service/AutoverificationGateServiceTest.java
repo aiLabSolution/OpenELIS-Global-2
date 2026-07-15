@@ -42,9 +42,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Unit coverage for the autoverification gate's verdict composition (LIS-55 /
- * S5.4): which combinations of reference-range, QC-run and delta-check
- * verdicts release an analysis versus hold it, plus the fail-safe behaviors
- * (disabled flag, unknown analyzer, non-numeric values, non-TA statuses).
+ * S5.4): which combinations of reference-range, QC-run and delta-check verdicts
+ * release an analysis versus hold it, plus the fail-safe behaviors (disabled
+ * flag, unknown analyzer, non-numeric values, non-TA statuses).
  *
  * <p>
  * Persistence-level behavior — that findActiveRejections really excludes
@@ -109,15 +109,13 @@ public class AutoverificationGateServiceTest {
 
         when(statusService.getStatusID(AnalysisStatus.TechnicalAcceptance)).thenReturn(TA_STATUS_ID);
         when(statusService.getStatusID(AnalysisStatus.Finalized)).thenReturn(FINALIZED_STATUS_ID);
-        when(qcRuleViolationService.findActiveRejections(anyString(), anyString()))
-                .thenReturn(Collections.emptyList());
+        when(qcRuleViolationService.findActiveRejections(anyString(), anyString())).thenReturn(Collections.emptyList());
         when(deltaCheckService.evaluate(any(), any())).thenReturn(DeltaCheckVerdict.notEvaluable("not installed"));
-        when(noteService.createSavableNote(any(), any(), anyString(), anyString(), anyString()))
-                .thenAnswer(inv -> {
-                    Note note = new Note();
-                    note.setText(inv.getArgument(2));
-                    return note;
-                });
+        when(noteService.createSavableNote(any(), any(), anyString(), anyString(), anyString())).thenAnswer(inv -> {
+            Note note = new Note();
+            note.setText(inv.getArgument(2));
+            return note;
+        });
     }
 
     @After
@@ -320,8 +318,8 @@ public class AutoverificationGateServiceTest {
     @Test
     public void oneBadResultHoldsTheWholeAnalysis() {
         Analysis analysis = analysis("100");
-        gate.evaluateAndFinalize(
-                grouping(analysis, numericResult("50", 40.0, 60.0), numericResult("75", 40.0, 60.0)), "7");
+        gate.evaluateAndFinalize(grouping(analysis, numericResult("50", 40.0, 60.0), numericResult("75", 40.0, 60.0)),
+                "7");
         assertEquals(TA_STATUS_ID, analysis.getStatusId());
         verify(analysisService, never()).update(any());
     }

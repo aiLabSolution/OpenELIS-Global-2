@@ -1,8 +1,7 @@
 package org.openelisglobal.autoverification.service;
 
 /**
- * Verdict returned by a {@link DeltaCheckService} for a single incoming
- * result.
+ * Verdict returned by a {@link DeltaCheckService} for a single incoming result.
  *
  * <p>
  * Semantics for the autoverification gate (LIS-55):
@@ -12,10 +11,10 @@ package org.openelisglobal.autoverification.service;
  * <li>{@link Outcome#FLAGGED} — the change versus the prior result exceeds the
  * configured thresholds; the gate holds the result for human review with
  * {@link #getReason()} recorded.</li>
- * <li>{@link Outcome#NOT_EVALUABLE} — no delta comparison is possible (no
- * prior final result, non-numeric value, or no delta engine installed). A
- * delta check that cannot run is not a delta <i>violation</i>, so this does
- * not block autorelease on its own; the range and QC legs still apply.</li>
+ * <li>{@link Outcome#NOT_EVALUABLE} — no delta comparison is possible (no prior
+ * final result, non-numeric value, or no delta engine installed). A delta check
+ * that cannot run is not a delta <i>violation</i>, so this does not block
+ * autorelease on its own; the range and QC legs still apply.</li>
  * </ul>
  */
 public final class DeltaCheckVerdict {

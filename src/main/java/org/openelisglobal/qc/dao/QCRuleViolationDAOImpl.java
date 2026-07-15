@@ -111,15 +111,13 @@ public class QCRuleViolationDAOImpl extends BaseDAOImpl<QCRuleViolation, String>
     }
 
     @Override
-    public List<QCRuleViolation> findActiveRejections(String instrumentId, String testId)
-            throws LIMSRuntimeException {
+    public List<QCRuleViolation> findActiveRejections(String instrumentId, String testId) throws LIMSRuntimeException {
         try {
             CriteriaBuilder cb = entityManager.getCriteriaBuilder();
             CriteriaQuery<QCRuleViolation> cq = cb.createQuery(QCRuleViolation.class);
             Root<QCRuleViolation> root = cq.from(QCRuleViolation.class);
             cq.where(cb.equal(root.get("instrumentId"), instrumentId), cb.equal(root.get("testId"), testId),
-                    cb.equal(root.get("severity"), "REJECTION"),
-                    cb.notEqual(root.get("resolutionStatus"), "RESOLVED"));
+                    cb.equal(root.get("severity"), "REJECTION"), cb.notEqual(root.get("resolutionStatus"), "RESOLVED"));
             cq.orderBy(cb.desc(root.get("violationDateTime")));
             return entityManager.createQuery(cq).getResultList();
         } catch (RuntimeException e) {

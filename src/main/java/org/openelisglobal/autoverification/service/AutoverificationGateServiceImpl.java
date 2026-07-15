@@ -103,8 +103,8 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
 
     /**
      * Analyses and results are paired positionally in a SampleGrouping (see
-     * AnalyzerResultsServiceImpl.insertResults); the same analysis may appear
-     * at several indices, so collect all of its results before deciding.
+     * AnalyzerResultsServiceImpl.insertResults); the same analysis may appear at
+     * several indices, so collect all of its results before deciding.
      */
     private Map<Analysis, List<Result>> pairByAnalysis(List<SampleGrouping> sampleGroupings) {
         Map<Analysis, List<Result>> byAnalysis = new LinkedHashMap<>();
@@ -192,8 +192,7 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     }
 
     private void hold(Analysis analysis, List<String> reasons, String sysUserId) {
-        insertNote(analysis, "Autoverification hold — held for human review: " + String.join("; ", reasons),
-                sysUserId);
+        insertNote(analysis, "Autoverification hold — held for human review: " + String.join("; ", reasons), sysUserId);
 
         LogEvent.logInfo(getClass().getSimpleName(), "hold",
                 "Held analysis " + analysis.getId() + " for human review: " + String.join("; ", reasons));

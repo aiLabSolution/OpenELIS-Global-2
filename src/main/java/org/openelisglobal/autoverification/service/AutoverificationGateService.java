@@ -22,14 +22,14 @@ public interface AutoverificationGateService {
      * auto-finalize it or hold it for human review with a recorded reason.
      *
      * <p>
-     * No-op unless {@code autoverification.enabled=true}. Only analyses
-     * currently at TechnicalAcceptance are considered; everything else
-     * (rejected, already finalized) is left untouched.
+     * No-op unless {@code autoverification.enabled=true}. Only analyses currently
+     * at TechnicalAcceptance are considered; everything else (rejected, already
+     * finalized) is left untouched.
      *
-     * @param sampleGroupings the groupings persisted by the analyzer accept
-     *                        path; analyses and results are paired positionally
-     * @param sysUserId       the user driving the accept, used for audit trail
-     *                        and note attribution
+     * @param sampleGroupings the groupings persisted by the analyzer accept path;
+     *                        analyses and results are paired positionally
+     * @param sysUserId       the user driving the accept, used for audit trail and
+     *                        note attribution
      */
     void evaluateAndFinalize(List<SampleGrouping> sampleGroupings, String sysUserId);
 }

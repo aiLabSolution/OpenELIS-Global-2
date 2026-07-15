@@ -38,20 +38,20 @@ import org.springframework.test.util.ReflectionTestUtils;
  *
  * <p>
  * AC1 — a synthetic run with an out-of-control (1₃ₛ, the codebase's canonical
- * spelling of 1_3s) QC result blocks autorelease of that run's patient
- * results: the persisted analysis stays at TechnicalAcceptance with no
- * released date, and the hold reason (violated rule named) is recorded.
+ * spelling of 1_3s) QC result blocks autorelease of that run's patient results:
+ * the persisted analysis stays at TechnicalAcceptance with no released date,
+ * and the hold reason (violated rule named) is recorded.
  *
  * <p>
  * AC2 — an in-control run auto-finalizes an in-range, within-delta result
- * (Finalized + releasedDate + "Auto-verified by system" note = the
- * status=final / verified_by=system contract; core has no verified_by
- * column), while an out-of-range and a delta-flagged result in the same
- * accepted batch are each held with their reason recorded.
+ * (Finalized + releasedDate + "Auto-verified by system" note = the status=final
+ * / verified_by=system contract; core has no verified_by column), while an
+ * out-of-range and a delta-flagged result in the same accepted batch are each
+ * held with their reason recorded.
  *
  * <p>
- * The QC violations are produced by the REAL Westgard engine: the test posts
- * a QC value through {@code QCResultService.createQCResult} and waits for the
+ * The QC violations are produced by the REAL Westgard engine: the test posts a
+ * QC value through {@code QCResultService.createQCResult} and waits for the
  * async evaluation listener to classify the run (the listener rewrites
  * {@code QCResult.resultStatus} to ACCEPTED/REJECTED in the same transaction
  * that persists the violations, so polling that status is race-free).
@@ -200,10 +200,10 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     }
 
     /**
-     * Post a QC value through the real pipeline and wait for the async
-     * Westgard evaluation to classify it. The listener persists violations and
-     * rewrites resultStatus in one REQUIRES_NEW transaction, so a non-PENDING
-     * status implies the violations are committed and visible.
+     * Post a QC value through the real pipeline and wait for the async Westgard
+     * evaluation to classify it. The listener persists violations and rewrites
+     * resultStatus in one REQUIRES_NEW transaction, so a non-PENDING status implies
+     * the violations are committed and visible.
      */
     private QCResult runQC(String value, String expectedStatus) throws InterruptedException {
         QCResult qcResult = qcResultService.createQCResult(ANALYZER_ID, TEST_ID, CONTROL_LOT_ID, "NORMAL",
@@ -233,9 +233,8 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     }
 
     private List<String> gateNotes(Analysis analysis) {
-        return jdbcTemplate.queryForList(
-                "SELECT text FROM clinlims.note WHERE reference_id = ? AND subject = ?", String.class,
-                Integer.valueOf(analysis.getId()), AutoverificationGateServiceImpl.NOTE_SUBJECT);
+        return jdbcTemplate.queryForList("SELECT text FROM clinlims.note WHERE reference_id = ? AND subject = ?",
+                String.class, Integer.valueOf(analysis.getId()), AutoverificationGateServiceImpl.NOTE_SUBJECT);
     }
 
     private String technicalAcceptanceId() {
@@ -248,8 +247,7 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
 
     private void assertHeld(String accession, String... reasonFragments) {
         Analysis analysis = findSingleAnalysis(accession);
-        assertEquals("held analysis must stay at TechnicalAcceptance", technicalAcceptanceId(),
-                analysis.getStatusId());
+        assertEquals("held analysis must stay at TechnicalAcceptance", technicalAcceptanceId(), analysis.getStatusId());
         assertNull("held analysis must not carry a released date", analysis.getReleasedDate());
         List<String> notes = gateNotes(analysis);
         assertEquals("exactly one hold note expected for " + accession, 1, notes.size());
@@ -270,8 +268,8 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         assertTrue("system attribution must be recorded, got: " + notes.get(0),
                 notes.get(0).contains("Auto-verified by system"));
         assertEquals("persisted Result row must exist for the finalized analysis", Integer.valueOf(1),
-                jdbcTemplate.queryForObject("SELECT count(*) FROM clinlims.result WHERE analysis_id = ?",
-                        Integer.class, Integer.valueOf(analysis.getId())));
+                jdbcTemplate.queryForObject("SELECT count(*) FROM clinlims.result WHERE analysis_id = ?", Integer.class,
+                        Integer.valueOf(analysis.getId())));
     }
 
     // ---------------------------------------------------------------
