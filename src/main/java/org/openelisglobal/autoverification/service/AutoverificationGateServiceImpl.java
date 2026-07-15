@@ -93,28 +93,30 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * <li>RESULT_VALIDATION notification per released result (per-result try/catch
  * — a notification failure never blocks a release, exactly as upstream);</li>
  * <li>sample-completion roll-up — the parent sample rolls to
- * {@code OrderStatus.Finished} when every analysis on it is terminal
- * (Finalized / Canceled / NonConforming), detached before mutation for the
- * audit diff;</li>
- * <li>registered {@link IResultUpdate} updaters get
- * {@code transactionalUpdate} with the same ResultSet shape the controller
- * builds (DocumentTrack-classified new-vs-corrected, resultEvent stamped).
- * {@code postTransactionalCommitUpdate} is intentionally <b>not</b> invoked —
- * the human path's call is disabled (commented out) upstream, and parity, not
- * improvement, is the contract here;</li>
- * <li>FHIR export
- * ({@code transformPersistResultValidationFhirObjects}) — deferred to
- * <b>afterCommit</b>: the transform is {@code @Async} and re-loads every
- * entity by id in its own read-only transaction, so dispatching it before this
- * transaction commits would race the commit (the human path gets this ordering
- * for free by calling it after persistdata returns). An export failure is
- * logged but does not un-release — same residual as the human path.</li>
+ * {@code OrderStatus.Finished} when every analysis on it is terminal (Finalized
+ * / Canceled / NonConforming), detached before mutation for the audit
+ * diff;</li>
+ * <li>registered {@link IResultUpdate} updaters get {@code transactionalUpdate}
+ * with the same ResultSet shape the controller builds (DocumentTrack-classified
+ * new-vs-corrected, resultEvent stamped). {@code postTransactionalCommitUpdate}
+ * is intentionally <b>not</b> invoked — the human path's call is disabled
+ * (commented out) upstream, and parity, not improvement, is the contract
+ * here;</li>
+ * <li>FHIR export ({@code transformPersistResultValidationFhirObjects}) —
+ * deferred to <b>afterCommit</b>: the transform is {@code @Async} and re-loads
+ * every entity by id in its own read-only transaction, so dispatching it before
+ * this transaction commits would race the commit (the human path gets this
+ * ordering for free by calling it after persistdata returns). An export failure
+ * is logged but does not un-release — same residual as the human path.</li>
  * </ol>
- * An updater or roll-up failure rolls the whole gate transaction back
- * (releases stay atomic with their transactional side effects; the analyses
- * simply stay at TechnicalAcceptance for human validation). Hold ⇒ the
- * analysis stays at TechnicalAcceptance and an internal Note records every
- * failed leg.
+ * An updater or roll-up failure rolls the whole gate transaction back (releases
+ * stay atomic with their transactional side effects; the analyses simply stay
+ * at TechnicalAcceptance for human validation). The notification dispatch is
+ * the one non-transactional exception: the sender is {@code @Async}, so a
+ * notification already in flight when a later leg rolls the release back may
+ * still deliver — the human path has the identical window (persistdata notifies
+ * before its sample and updater legs). Hold ⇒ the analysis stays at
+ * TechnicalAcceptance and an internal Note records every failed leg.
  *
  * <p>
  * The SampleGrouping analyses are detached copies whose {@code @Version} is
@@ -173,8 +175,8 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
 
     /**
      * Seam over the static {@link ValidationUpdateRegister} (which reads
-     * ConfigurationProperties), so tests can substitute updaters without
-     * touching global state.
+     * ConfigurationProperties), so tests can substitute updaters without touching
+     * global state.
      */
     private Supplier<List<IResultUpdate>> updatersSupplier = ValidationUpdateRegister::getRegisteredUpdaters;
 
@@ -198,6 +200,7 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
 
         List<Analysis> finalizedAnalyses = new ArrayList<>();
         ArrayList<Result> finalizedResults = new ArrayList<>();
+        Set<String> finalizedResultIds = new LinkedHashSet<>();
         Map<String, String> sampleIdByAnalysisId = new LinkedHashMap<>();
 
         for (Map.Entry<String, List<Result>> entry : pairByAnalysisId(sampleGroupings).entrySet()) {
@@ -239,6 +242,13 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
                                 + " released analysis " + analysis.getId() + " — excluded from notification/export");
                         continue;
                     }
+                    if (!finalizedResultIds.add(result.getId())) {
+                        // the same persisted row can arrive as several
+                        // detached copies — the FHIR transform dedups by
+                        // composite key but the notification leg would fire
+                        // once per copy
+                        continue;
+                    }
                     // downstream consumers (notification config lookup, FHIR
                     // device reference) navigate result.getAnalysis() — hand
                     // them the reloaded analysis, not the stale grouping copy
@@ -257,8 +267,8 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
         // (persistdata: notifications -> sample roll-up -> updaters; then the
         // controller's FHIR export after commit).
         sendReleaseNotifications(finalizedResults);
-        ArrayList<Sample> finishedSamples = rollUpFinishedSamples(
-                new LinkedHashSet<>(sampleIdByAnalysisId.values()), sysUserId);
+        ArrayList<Sample> finishedSamples = rollUpFinishedSamples(new LinkedHashSet<>(sampleIdByAnalysisId.values()),
+                sysUserId);
         runRegisteredUpdaters(finalizedResults, sampleIdByAnalysisId);
         scheduleFhirExport(finalizedAnalyses, finalizedResults, finishedSamples);
     }
@@ -433,15 +443,14 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     // ---------------------------------------------------------------
 
     /**
-     * Same call, same guard as persistdata: a notification failure is logged
-     * and never blocks the release (the sender is also {@code @Async}
-     * upstream).
+     * Same call, same guard as persistdata: a notification failure is logged and
+     * never blocks the release (the sender is also {@code @Async} upstream).
      */
     private void sendReleaseNotifications(List<Result> finalizedResults) {
         for (Result result : finalizedResults) {
             try {
-                testNotificationService.createAndSendNotificationsToConfiguredSources(
-                        NotificationNature.RESULT_VALIDATION, result);
+                testNotificationService
+                        .createAndSendNotificationsToConfiguredSources(NotificationNature.RESULT_VALIDATION, result);
             } catch (RuntimeException e) {
                 LogEvent.logError(e);
             }
@@ -449,10 +458,10 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     }
 
     /**
-     * checkIfSamplesFinished, gate-side: a parent sample whose analyses are
-     * all terminal (Finalized / Canceled / NonConforming) rolls to
-     * {@code OrderStatus.Finished}. The just-finalized analyses are visible to
-     * the query because their merge flushed in this same session.
+     * checkIfSamplesFinished, gate-side: a parent sample whose analyses are all
+     * terminal (Finalized / Canceled / NonConforming) rolls to
+     * {@code OrderStatus.Finished}. The just-finalized analyses are visible to the
+     * query because their merge flushed in this same session.
      */
     private ArrayList<Sample> rollUpFinishedSamples(Set<String> sampleIds, String sysUserId) {
         ArrayList<Sample> finishedSamples = new ArrayList<>();
@@ -498,14 +507,14 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     }
 
     /**
-     * The controller's updater leg: registered {@link IResultUpdate} updaters
-     * get {@code transactionalUpdate} with ResultSets built exactly like
+     * The controller's updater leg: registered {@link IResultUpdate} updaters get
+     * {@code transactionalUpdate} with ResultSets built exactly like
      * {@code addResultSets} (DocumentTrack decides new-vs-corrected, the
      * resultEvent is stamped). {@code postTransactionalCommitUpdate} is
      * intentionally not invoked — its call site in the human path is disabled
-     * (commented out) upstream, and the gate replicates the human path, it
-     * does not extend it. An updater failure rolls the whole gate transaction
-     * back by contract ("If thrown all transactions will be rolled back").
+     * (commented out) upstream, and the gate replicates the human path, it does not
+     * extend it. An updater failure rolls the whole gate transaction back by
+     * contract ("If thrown all transactions will be rolled back").
      */
     private void runRegisteredUpdaters(List<Result> finalizedResults, Map<String, String> sampleIdByAnalysisId) {
         List<IResultUpdate> updaters = updatersSupplier.get();
@@ -541,11 +550,11 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     }
 
     /**
-     * The controller's FHIR export leg, deferred to afterCommit: the transform
-     * is {@code @Async} and re-loads every entity by id in its own read-only
-     * transaction, so it must not be dispatched before this transaction's
-     * commit is visible. Without an active transaction (plain unit-test calls)
-     * there is nothing to wait for and the export runs inline.
+     * The controller's FHIR export leg, deferred to afterCommit: the transform is
+     * {@code @Async} and re-loads every entity by id in its own read-only
+     * transaction, so it must not be dispatched before this transaction's commit is
+     * visible. Without an active transaction (plain unit-test calls) there is
+     * nothing to wait for and the export runs inline.
      */
     private void scheduleFhirExport(List<Analysis> finalizedAnalyses, ArrayList<Result> finalizedResults,
             ArrayList<Sample> finishedSamples) {

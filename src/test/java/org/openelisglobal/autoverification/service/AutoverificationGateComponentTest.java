@@ -5,7 +5,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -113,7 +112,9 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     @Autowired
     private TestNotificationService testNotificationService;
 
-    /** the human validation queue's exact lookup (AccessionValidationRestController) */
+    /**
+     * the human validation queue's exact lookup (AccessionValidationRestController)
+     */
     @Autowired
     private ResultsValidationUtility resultsValidationUtility;
 
@@ -502,8 +503,8 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     }
 
     /**
-     * The roll-up refuses while a sibling analysis on the sample is still
-     * open: the release itself (and its export) must still happen.
+     * The roll-up refuses while a sibling analysis on the sample is still open: the
+     * release itself (and its export) must still happen.
      */
     @Test
     public void openSiblingAnalysis_blocksSampleCompletion_butReleaseStillExports() throws Exception {
@@ -530,12 +531,11 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     }
 
     /**
-     * AC3 (replay leg): a released analysis is no longer at
-     * TechnicalAcceptance, so a repeated gate pass over the same grouping —
-     * the double-fire vector on our side — must produce no second export,
-     * notification or note. (The human path cannot double-fire either: the
-     * validation queue selects TechnicalAcceptance analyses only, and this
-     * one is Finalized.)
+     * AC3 (replay leg): a released analysis is no longer at TechnicalAcceptance, so
+     * a repeated gate pass over the same grouping — the double-fire vector on our
+     * side — must produce no second export, notification or note. (The human path
+     * cannot double-fire either: the validation queue selects TechnicalAcceptance
+     * analyses only, and this one is Finalized.)
      */
     @Test
     public void replayedGatePass_isIdempotent_noSecondExportNotificationOrNote() throws Exception {
@@ -562,14 +562,13 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         // re-notify) it
         assertTrue("auto-finalized analysis must be gone from the human validation queue",
                 resultsValidationUtility.getResultValidationList(
-                        List.of(technicalAcceptanceId(),
-                                statusService.getStatusID(AnalysisStatus.TechnicalRejected)),
+                        List.of(technicalAcceptanceId(), statusService.getStatusID(AnalysisStatus.TechnicalRejected)),
                         null, "AVGT200", null).isEmpty());
     }
 
     /**
-     * A NotStarted sibling on the ordered sample's item, test 7812 — never
-     * sent by the analyzer, so it stays open through the accept.
+     * A NotStarted sibling on the ordered sample's item, test 7812 — never sent by
+     * the analyzer, so it stays open through the accept.
      */
     private void seedOpenSiblingAnalysis() {
         String notStartedId = statusService.getStatusID(AnalysisStatus.NotStarted);

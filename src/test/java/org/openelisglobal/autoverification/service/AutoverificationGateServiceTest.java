@@ -589,10 +589,26 @@ public class AutoverificationGateServiceTest {
 
         gate.evaluateAndFinalize(grouping(analysis, result), "7");
 
-        verify(testNotificationService).createAndSendNotificationsToConfiguredSources(NotificationNature.RESULT_VALIDATION,
-                result);
+        verify(testNotificationService)
+                .createAndSendNotificationsToConfiguredSources(NotificationNature.RESULT_VALIDATION, result);
         org.junit.Assert.assertSame("the notified result must carry the reloaded analysis, not the stale grouping copy",
                 analysis, result.getAnalysis());
+    }
+
+    @Test
+    public void duplicateDetachedCopiesOfOnePersistedResult_notifyOnlyOnce() {
+        // the same persisted result row arriving as two detached copies (same
+        // analysis at two grouping indices) must not double-notify — the FHIR
+        // transform dedups by composite key, the notification leg must too
+        Analysis analysis = analysis("100");
+        Result firstCopy = persistedResult("601", "50", 40.0, 60.0);
+        Result secondCopy = persistedResult("601", "50", 40.0, 60.0);
+
+        gate.evaluateAndFinalize(grouping(analysis, firstCopy, secondCopy), "7");
+
+        assertEquals(FINALIZED_STATUS_ID, analysis.getStatusId());
+        verify(testNotificationService).createAndSendNotificationsToConfiguredSources(
+                eq(NotificationNature.RESULT_VALIDATION), any(Result.class));
     }
 
     @Test
@@ -658,8 +674,7 @@ public class AutoverificationGateServiceTest {
         gate.evaluateAndFinalize(grouping(analysis, result), "7");
 
         Sample sample = sampleService.get(sampleIdFor("100"));
-        assertEquals("parent sample must roll to OrderStatus.Finished", ORDER_FINISHED_STATUS_ID,
-                sample.getStatusId());
+        assertEquals("parent sample must roll to OrderStatus.Finished", ORDER_FINISHED_STATUS_ID, sample.getStatusId());
         verify(sampleService).update(sample);
         // same audit idiom as the analysis: detach before mutation so the
         // audit diff sees the Started -> Finished transition
@@ -740,8 +755,8 @@ public class AutoverificationGateServiceTest {
         verify(testNotificationService, never()).createAndSendNotificationsToConfiguredSources(any(), any());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<ArrayList<Result>> results = ArgumentCaptor.forClass(ArrayList.class);
-        verify(fhirTransformService).transformPersistResultValidationFhirObjects(any(), any(), results.capture(),
-                any(), any(), any());
+        verify(fhirTransformService).transformPersistResultValidationFhirObjects(any(), any(), results.capture(), any(),
+                any(), any());
         assertTrue("id-less results cannot ride the export", results.getValue().isEmpty());
     }
 
