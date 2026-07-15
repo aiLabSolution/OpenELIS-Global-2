@@ -17,6 +17,7 @@ import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Supplier;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -24,23 +25,43 @@ import org.mockito.ArgumentCaptor;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
+import org.openelisglobal.common.services.IResultSaveService;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
+import org.openelisglobal.common.services.StatusService.OrderStatus;
+import org.openelisglobal.common.services.registration.interfaces.IResultUpdate;
 import org.openelisglobal.common.util.ConfigurationProperties.Property;
 import org.openelisglobal.common.util.DefaultConfigurationProperties;
+import org.openelisglobal.dataexchange.fhir.service.FhirTransformService;
+import org.openelisglobal.dataexchange.orderresult.OrderResponseWorker.Event;
 import org.openelisglobal.internationalization.MessageUtil;
 import org.openelisglobal.note.service.NoteService;
 import org.openelisglobal.note.service.NoteServiceImpl.NoteType;
 import org.openelisglobal.note.valueholder.Note;
+import org.openelisglobal.notification.service.TestNotificationService;
+import org.openelisglobal.notification.valueholder.NotificationConfigOption.NotificationNature;
+import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.qc.dao.QCResultDAO;
 import org.openelisglobal.qc.service.QCRuleViolationService;
 import org.openelisglobal.qc.valueholder.QCResult;
 import org.openelisglobal.qc.valueholder.QCRuleViolation;
+import org.openelisglobal.referencetables.service.ReferenceTablesService;
+import org.openelisglobal.referencetables.valueholder.ReferenceTables;
+import org.openelisglobal.reports.service.DocumentTrackService;
+import org.openelisglobal.reports.service.DocumentTypeService;
+import org.openelisglobal.reports.valueholder.DocumentTrack;
+import org.openelisglobal.reports.valueholder.DocumentType;
 import org.openelisglobal.result.valueholder.Result;
+import org.openelisglobal.sample.service.SampleService;
+import org.openelisglobal.sample.valueholder.Sample;
+import org.openelisglobal.samplehuman.service.SampleHumanService;
+import org.openelisglobal.sampleitem.valueholder.SampleItem;
 import org.openelisglobal.spring.util.SpringContext;
 import org.springframework.beans.factory.config.AutowireCapableBeanFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Unit coverage for the autoverification gate's verdict composition (LIS-55 /
@@ -58,8 +79,13 @@ public class AutoverificationGateServiceTest {
 
     private static final String TA_STATUS_ID = "17";
     private static final String FINALIZED_STATUS_ID = "25";
+    private static final String CANCELED_STATUS_ID = "26";
+    private static final String NONCONFORMING_STATUS_ID = "27";
+    private static final String ORDER_FINISHED_STATUS_ID = "35";
     private static final String ANALYZER_ID = "2001";
     private static final String TEST_ID = "4001";
+    private static final String RESULT_TABLE_ID = "9";
+    private static final String RESULT_REPORT_ID = "19";
 
     private AutoverificationGateServiceImpl gate;
     private AnalysisService analysisService;
@@ -69,6 +95,13 @@ public class AutoverificationGateServiceTest {
     private DeltaCheckService deltaCheckService;
     private IStatusService statusService;
     private jakarta.persistence.EntityManager entityManager;
+    private SampleService sampleService;
+    private SampleHumanService sampleHumanService;
+    private TestNotificationService testNotificationService;
+    private FhirTransformService fhirTransformService;
+    private DocumentTrackService documentTrackService;
+    private ReferenceTablesService referenceTablesService;
+    private DocumentTypeService documentTypeService;
 
     private AutowireCapableBeanFactory previousFactory;
     private Object previousMessageUtilInstance;
@@ -105,6 +138,13 @@ public class AutoverificationGateServiceTest {
         deltaCheckService = mock(DeltaCheckService.class);
         statusService = mock(IStatusService.class);
         entityManager = mock(jakarta.persistence.EntityManager.class);
+        sampleService = mock(SampleService.class);
+        sampleHumanService = mock(SampleHumanService.class);
+        testNotificationService = mock(TestNotificationService.class);
+        fhirTransformService = mock(FhirTransformService.class);
+        documentTrackService = mock(DocumentTrackService.class);
+        referenceTablesService = mock(ReferenceTablesService.class);
+        documentTypeService = mock(DocumentTypeService.class);
 
         inject("analysisService", analysisService);
         inject("noteService", noteService);
@@ -113,10 +153,24 @@ public class AutoverificationGateServiceTest {
         inject("deltaCheckService", deltaCheckService);
         inject("statusService", statusService);
         inject("entityManager", entityManager);
+        inject("sampleService", sampleService);
+        inject("sampleHumanService", sampleHumanService);
+        inject("testNotificationService", testNotificationService);
+        inject("fhirTransformService", fhirTransformService);
+        inject("documentTrackService", documentTrackService);
+        inject("referenceTablesService", referenceTablesService);
+        inject("documentTypeService", documentTypeService);
+        // registered updaters resolve through the static
+        // ValidationUpdateRegister/ConfigurationProperties pair — stub the seam
+        // empty so unit tests opt in per test
+        inject("updatersSupplier", (Supplier<List<IResultUpdate>>) Collections::emptyList);
         inject("enabled", true);
 
         when(statusService.getStatusID(AnalysisStatus.TechnicalAcceptance)).thenReturn(TA_STATUS_ID);
         when(statusService.getStatusID(AnalysisStatus.Finalized)).thenReturn(FINALIZED_STATUS_ID);
+        when(statusService.getStatusID(AnalysisStatus.Canceled)).thenReturn(CANCELED_STATUS_ID);
+        when(statusService.getStatusID(AnalysisStatus.NonConforming_depricated)).thenReturn(NONCONFORMING_STATUS_ID);
+        when(statusService.getStatusID(OrderStatus.Finished)).thenReturn(ORDER_FINISHED_STATUS_ID);
         when(qcRuleViolationService.findActiveRejections(anyString(), anyString())).thenReturn(Collections.emptyList());
         when(qcResultDAO.findPendingByInstrumentAndTest(anyString(), anyString())).thenReturn(Collections.emptyList());
         when(deltaCheckService.evaluate(any(), any())).thenReturn(DeltaCheckVerdict.notEvaluable("not installed"));
@@ -147,10 +201,28 @@ public class AutoverificationGateServiceTest {
         org.openelisglobal.test.valueholder.Test test = new org.openelisglobal.test.valueholder.Test();
         test.setId(TEST_ID);
         analysis.setTest(test);
+        // parent sample (id "9"+analysisId), reachable while the analysis is
+        // still managed — the sample-completion roll-up navigates it
+        Sample sample = new Sample();
+        sample.setId(sampleIdFor(id));
+        SampleItem sampleItem = new SampleItem();
+        sampleItem.setSample(sample);
+        analysis.setSampleItem(sampleItem);
+        when(sampleService.get(sample.getId())).thenReturn(sample);
         // the gate re-loads each analysis by id inside its transaction (the
         // grouping copies are detached with a stale @Version)
         when(analysisService.get(id)).thenReturn(analysis);
         return analysis;
+    }
+
+    private String sampleIdFor(String analysisId) {
+        return "9" + analysisId;
+    }
+
+    private Result persistedResult(String id, String value, Double min, Double max) {
+        Result result = numericResult(value, min, max);
+        result.setId(id);
+        return result;
     }
 
     private Result numericResult(String value, Double min, Double max) {
@@ -502,5 +574,231 @@ public class AutoverificationGateServiceTest {
         assertNotNull(released);
         assertTrue("releasedDate must be stamped at decision time",
                 released.getTime() >= before && released.getTime() <= after);
+    }
+
+    // ---------------------------------------------------------------
+    // Release side effects (LIS-226) — parity with the human validation
+    // path (ResultValidationServiceImpl.persistdata +
+    // AccessionValidationRestController)
+    // ---------------------------------------------------------------
+
+    @Test
+    public void autoFinalize_sendsResultValidationNotificationForThePersistedResult() {
+        Analysis analysis = analysis("100");
+        Result result = persistedResult("601", "50", 40.0, 60.0);
+
+        gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+        verify(testNotificationService).createAndSendNotificationsToConfiguredSources(NotificationNature.RESULT_VALIDATION,
+                result);
+        org.junit.Assert.assertSame("the notified result must carry the reloaded analysis, not the stale grouping copy",
+                analysis, result.getAnalysis());
+    }
+
+    @Test
+    public void autoFinalize_exportsFhirValidationObjectsForAnalysisAndResult() throws Exception {
+        Analysis analysis = analysis("100");
+        Result result = persistedResult("601", "50", 40.0, 60.0);
+
+        gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Result>> deletable = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Analysis>> analyses = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Result>> results = ArgumentCaptor.forClass(ArrayList.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Sample>> samples = ArgumentCaptor.forClass(ArrayList.class);
+        verify(fhirTransformService).transformPersistResultValidationFhirObjects(deletable.capture(),
+                analyses.capture(), results.capture(), any(), samples.capture(), any());
+
+        assertTrue("gate never cancels observations", deletable.getValue().isEmpty());
+        assertEquals(List.of(analysis), analyses.getValue());
+        assertEquals("analysis must be exported as Finalized (DiagnosticReport leg)", FINALIZED_STATUS_ID,
+                analyses.getValue().get(0).getStatusId());
+        assertEquals(List.of(result), results.getValue());
+        assertTrue("no sample finished in this scenario", samples.getValue().isEmpty());
+    }
+
+    @Test
+    public void fhirExportIsDeferredUntilAfterTransactionCommit() throws Exception {
+        // transformPersistResultValidationFhirObjects is @Async and re-loads
+        // every entity by id in its own read-only transaction — dispatched
+        // before the gate's transaction commits it would race the commit and
+        // see the pre-release state. The human path orders this by calling the
+        // transform after persistdata returns; the gate must defer to
+        // afterCommit.
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            Analysis analysis = analysis("100");
+            Result result = persistedResult("601", "50", 40.0, 60.0);
+            gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+            verify(fhirTransformService, never()).transformPersistResultValidationFhirObjects(any(), any(), any(),
+                    any(), any(), any());
+
+            for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+            verify(fhirTransformService).transformPersistResultValidationFhirObjects(any(), any(), any(), any(), any(),
+                    any());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    public void lastOpenAnalysisFinalized_rollsParentSampleToFinished_andExportsIt() throws Exception {
+        Analysis analysis = analysis("100");
+        Result result = persistedResult("601", "50", 40.0, 60.0);
+        // by roll-up time the (only) sibling list holds the just-finalized row
+        when(analysisService.getAnalysesBySampleId(sampleIdFor("100"))).thenReturn(List.of(analysis));
+
+        gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+        Sample sample = sampleService.get(sampleIdFor("100"));
+        assertEquals("parent sample must roll to OrderStatus.Finished", ORDER_FINISHED_STATUS_ID,
+                sample.getStatusId());
+        verify(sampleService).update(sample);
+        // same audit idiom as the analysis: detach before mutation so the
+        // audit diff sees the Started -> Finished transition
+        verify(entityManager).detach(sample);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Sample>> samples = ArgumentCaptor.forClass(ArrayList.class);
+        verify(fhirTransformService).transformPersistResultValidationFhirObjects(any(), any(), any(), any(),
+                samples.capture(), any());
+        assertEquals("finished sample must ride the FHIR export (Task/ServiceRequest leg)", List.of(sample),
+                samples.getValue());
+    }
+
+    @Test
+    public void openSiblingAnalysis_leavesParentSampleUnfinished() {
+        Analysis analysis = analysis("100");
+        Analysis openSibling = new Analysis();
+        openSibling.setId("101");
+        openSibling.setStatusId(TA_STATUS_ID);
+        when(analysisService.getAnalysesBySampleId(sampleIdFor("100"))).thenReturn(List.of(analysis, openSibling));
+
+        gate.evaluateAndFinalize(grouping(analysis, persistedResult("601", "50", 40.0, 60.0)), "7");
+
+        assertEquals(FINALIZED_STATUS_ID, analysis.getStatusId());
+        verify(sampleService, never()).update(any());
+    }
+
+    @Test
+    public void canceledSibling_countsAsTerminal_soSampleStillRolls() {
+        Analysis analysis = analysis("100");
+        Analysis canceledSibling = new Analysis();
+        canceledSibling.setId("101");
+        canceledSibling.setStatusId(CANCELED_STATUS_ID);
+        when(analysisService.getAnalysesBySampleId(sampleIdFor("100"))).thenReturn(List.of(analysis, canceledSibling));
+
+        gate.evaluateAndFinalize(grouping(analysis, persistedResult("601", "50", 40.0, 60.0)), "7");
+
+        verify(sampleService).update(sampleService.get(sampleIdFor("100")));
+    }
+
+    @Test
+    public void heldAnalysis_firesNoReleaseSideEffects() throws Exception {
+        when(qcRuleViolationService.findActiveRejections(ANALYZER_ID, TEST_ID))
+                .thenReturn(List.of(rejection("1_3s", "UNRESOLVED")));
+
+        Analysis analysis = analysis("100");
+        gate.evaluateAndFinalize(grouping(analysis, persistedResult("601", "50", 40.0, 60.0)), "7");
+
+        verify(testNotificationService, never()).createAndSendNotificationsToConfiguredSources(any(), any());
+        verify(fhirTransformService, never()).transformPersistResultValidationFhirObjects(any(), any(), any(), any(),
+                any(), any());
+        verify(sampleService, never()).update(any());
+    }
+
+    @Test
+    public void notificationFailure_isLoggedButDoesNotBlockReleaseOrExport() throws Exception {
+        // mirror of the human path's per-result try/catch in persistdata
+        org.mockito.Mockito.doThrow(new RuntimeException("notification transport down")).when(testNotificationService)
+                .createAndSendNotificationsToConfiguredSources(any(), any());
+
+        Analysis analysis = analysis("100");
+        gate.evaluateAndFinalize(grouping(analysis, persistedResult("601", "50", 40.0, 60.0)), "7");
+
+        assertEquals(FINALIZED_STATUS_ID, analysis.getStatusId());
+        verify(analysisService).update(analysis);
+        verify(fhirTransformService).transformPersistResultValidationFhirObjects(any(), any(), any(), any(), any(),
+                any());
+    }
+
+    @Test
+    public void unpersistedResult_isExcludedFromNotificationAndExport_butAnalysisStillReleases() throws Exception {
+        Analysis analysis = analysis("100");
+        Result result = numericResult("50", 40.0, 60.0); // no id — cannot be re-loaded downstream
+
+        gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+        assertEquals(FINALIZED_STATUS_ID, analysis.getStatusId());
+        verify(testNotificationService, never()).createAndSendNotificationsToConfiguredSources(any(), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Result>> results = ArgumentCaptor.forClass(ArrayList.class);
+        verify(fhirTransformService).transformPersistResultValidationFhirObjects(any(), any(), results.capture(),
+                any(), any(), any());
+        assertTrue("id-less results cannot ride the export", results.getValue().isEmpty());
+    }
+
+    @Test
+    public void registeredUpdaters_receiveTransactionalUpdate_butNeverTheDisabledPostCommitHook() throws Exception {
+        IResultUpdate updater = mock(IResultUpdate.class);
+        inject("updatersSupplier", (Supplier<List<IResultUpdate>>) () -> List.of(updater));
+        stubDocumentTrackLookups();
+
+        Analysis analysis = analysis("100");
+        Result result = persistedResult("601", "50", 40.0, 60.0);
+        Patient patient = new Patient();
+        when(sampleHumanService.getPatientForSample(sampleService.get(sampleIdFor("100")))).thenReturn(patient);
+
+        gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+        ArgumentCaptor<IResultSaveService> saveService = ArgumentCaptor.forClass(IResultSaveService.class);
+        verify(updater).transactionalUpdate(saveService.capture());
+        assertEquals("never-reported result must be classified as new", 1,
+                saveService.getValue().getNewResults().size());
+        assertTrue(saveService.getValue().getModifiedResults().isEmpty());
+        org.junit.Assert.assertSame(result, saveService.getValue().getNewResults().get(0).result);
+        org.junit.Assert.assertSame(patient, saveService.getValue().getNewResults().get(0).patient);
+        org.junit.Assert.assertSame(sampleService.get(sampleIdFor("100")),
+                saveService.getValue().getNewResults().get(0).sample);
+        assertEquals(Event.FINAL_RESULT, result.getResultEvent());
+        // the human path's postTransactionalCommitUpdate call is disabled
+        // (commented out upstream) — parity means never invoking it here either
+        verify(updater, never()).postTransactionalCommitUpdate(any());
+    }
+
+    @Test
+    public void alreadyReportedResult_isClassifiedAsCorrectionForUpdaters() throws Exception {
+        IResultUpdate updater = mock(IResultUpdate.class);
+        inject("updatersSupplier", (Supplier<List<IResultUpdate>>) () -> List.of(updater));
+        stubDocumentTrackLookups();
+        when(documentTrackService.getByTypeRecordAndTable(RESULT_REPORT_ID, RESULT_TABLE_ID, "601"))
+                .thenReturn(List.of(new DocumentTrack()));
+
+        Analysis analysis = analysis("100");
+        Result result = persistedResult("601", "50", 40.0, 60.0);
+
+        gate.evaluateAndFinalize(grouping(analysis, result), "7");
+
+        ArgumentCaptor<IResultSaveService> saveService = ArgumentCaptor.forClass(IResultSaveService.class);
+        verify(updater).transactionalUpdate(saveService.capture());
+        assertTrue(saveService.getValue().getNewResults().isEmpty());
+        assertEquals(1, saveService.getValue().getModifiedResults().size());
+        assertEquals(Event.CORRECTION, result.getResultEvent());
+    }
+
+    private void stubDocumentTrackLookups() {
+        ReferenceTables resultTable = new ReferenceTables();
+        resultTable.setId(RESULT_TABLE_ID);
+        when(referenceTablesService.getReferenceTableByName("RESULT")).thenReturn(resultTable);
+        DocumentType reportType = new DocumentType();
+        reportType.setId(RESULT_REPORT_ID);
+        when(documentTypeService.getDocumentTypeByName("resultExport")).thenReturn(reportType);
     }
 }
