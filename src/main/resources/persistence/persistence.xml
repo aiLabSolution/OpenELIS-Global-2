@@ -137,6 +137,9 @@
         <class>org.openelisglobal.qc.valueholder.QCRuleViolation</class>
         <class>org.openelisglobal.qc.valueholder.QCAlert</class>
 
+        <!-- Delta-check thresholds (LIS-54) -->
+        <class>org.openelisglobal.autoverification.valueholder.DeltaCheckConfig</class>
+
         <!-- Barcode Label Presets (OGC-285 M2) -->
         <class>org.openelisglobal.labelpreset.valueholder.LabelPreset</class>
         <class>org.openelisglobal.labelpreset.valueholder.LabelPresetField</class>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-54 — per-test delta-check thresholds for the autoverification   -->
+    <!-- gate's delta leg (LIS-55 SPI).                                      -->
+    <!--                                                                    -->
+    <!-- One row per test: the maximum plausible change between a patient's  -->
+    <!-- most recent prior FINAL result and an incoming result for the same  -->
+    <!-- test. absolute_change is in the result's own unit;                  -->
+    <!-- relative_change_percent is a percentage of the prior value. Either  -->
+    <!-- may be NULL (that leg is not checked); a row with both NULL — like  -->
+    <!-- no row, or active=false — leaves the test unconfigured and the      -->
+    <!-- delta check NOT_EVALUABLE (non-blocking).                           -->
+    <!--                                                                    -->
+    <!-- NUMERIC (not float8) on purpose: S5.3 AC1 demands flag-or-pass      -->
+    <!-- exactly at the threshold boundary, so the engine compares exact     -->
+    <!-- decimals end to end.                                                -->
+    <!-- Column is last_updated from day one — the qc tables' lastupdated    -->
+    <!-- rename (qc/006) documents the BaseObject @Column(name =            -->
+    <!-- "last_updated") mapping this must match.                            -->
+    <!-- ================================================================== -->
+    <changeSet id="lis54-056-create-delta-check-config" author="lis">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="delta_check_config"/>
+            </not>
+        </preConditions>
+        <comment>Create per-test delta-check threshold configuration (LIS-54)</comment>
+        <createTable tableName="delta_check_config">
+            <column name="id" type="VARCHAR(36)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="test_id" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="absolute_change" type="NUMERIC(15,5)"/>
+            <column name="relative_change_percent" type="NUMERIC(15,5)"/>
+            <column name="active" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_updated" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+            baseTableName="delta_check_config"
+            baseColumnNames="test_id"
+            constraintName="fk_delta_check_config_test"
+            referencedTableName="test"
+            referencedColumnNames="id"/>
+        <addUniqueConstraint
+            tableName="delta_check_config"
+            columnNames="test_id"
+            constraintName="uk_delta_check_config_test"/>
+    </changeSet>
+
+</databaseChangeLog>
