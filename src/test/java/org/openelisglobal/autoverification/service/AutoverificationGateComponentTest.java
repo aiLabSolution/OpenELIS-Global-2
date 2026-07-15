@@ -1,6 +1,7 @@
 package org.openelisglobal.autoverification.service;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -18,6 +19,7 @@ import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsAcceptServiceImpl;
+import org.openelisglobal.autoverification.dao.DeltaCheckPriorResultDAO;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
@@ -93,6 +95,9 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
 
     @Autowired
     private IStatusService statusService;
+
+    @Autowired
+    private DeltaCheckPriorResultDAO deltaCheckPriorResultDAO;
 
     private AutoverificationGateServiceImpl gateTarget;
     private DeltaCheckService originalDeltaCheckService;
@@ -495,6 +500,23 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         assertAutoFinalized("AVGT602");
         assertTrue("within-threshold result's note must record the delta pass",
                 gateNotes(findSingleAnalysis("AVGT602")).get(0).contains("delta: within threshold"));
+    }
+
+    @Test
+    public void unknownPlaceholderGuard_anchorsToPatientUtilPlaceholder() {
+        // The DAO detects the placeholder by the 'UNKNOWN_' person last name —
+        // a literal duplicated from PatientUtil.initializeUnknowns() because
+        // upstream exposes no constant. Anchor the guard to the REAL
+        // placeholder PatientUtil maintains so a silent upstream rename breaks
+        // this test instead of silently reviving cross-patient delta
+        // comparisons (port-every-assertion rule).
+        String unknownPatientId = org.openelisglobal.patient.util.PatientUtil.getUnknownPatient().getId();
+        assertTrue("PatientUtil's own placeholder must be detected",
+                deltaCheckPriorResultDAO.isUnknownPlaceholderPatient(unknownPatientId));
+
+        seedOrderedSamplesForDeltaPatient();
+        assertFalse("a real patient must not be classified as the placeholder",
+                deltaCheckPriorResultDAO.isUnknownPlaceholderPatient("7861"));
     }
 
     @Test
