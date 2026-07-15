@@ -31,4 +31,14 @@ public class AnalyzerResultsControllerTest extends BaseWebContextSensitiveTest {
         mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultList[0].duplicateAnalyzerResultId").value("1001"));
     }
+
+    // LIS-126: the unmatched-sample confirmation checkbox keys off
+    // row.unmatchedSample, so the GET JSON must carry it — computed
+    // server-side per accession (no sample exists for ACC123456 in the
+    // fixture), never bound from the client POST.
+    @Test
+    public void showRestAnalyzerResults_ShouldExposeUnmatchedSample() throws Exception {
+        mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultList[0].unmatchedSample").value(true));
+    }
 }

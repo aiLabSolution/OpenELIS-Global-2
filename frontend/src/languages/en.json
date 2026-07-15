@@ -588,6 +588,7 @@
   "analyzer.qcRules.error.loadFailed": "Failed to load QC rules",
   "analyzer.qcRules.error.saveFailed": "Failed to save QC rule",
   "analyzer.qcRules.error.deleteFailed": "Failed to delete QC rule",
+  "analyzer.unmatched.accept.label": "No matching order — accept as unidentified patient",
   "analyzerTestName.header.analyzerName": "Analyzer - Analyzer Test Name",
   "analyzerTestName.modal.add.heading": "Add Analyzer Test Name",
   "analyzerTestName.modal.update.heading": "Update Analyzer Test Name",
