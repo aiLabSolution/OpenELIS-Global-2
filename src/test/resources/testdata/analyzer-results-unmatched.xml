@@ -1,0 +1,111 @@
+<dataset>
+    <!-- LIS-126: unmatched-sample accept-gate fixtures. Test 4001 and
+         analyzer 2001 are copied verbatim from analyzer-results.xml so the
+         analyzer_results FKs resolve. The type_of_sample/sampletype_test
+         rows let the confirmed-accept tests run the full persist path
+         (getTypeOfSampleId indexes the first mapping for the test). -->
+    <localization id="9301" description="Whole Blood" />
+
+    <test id="4001" description="Blood Test" loinc="123456"
+        reporting_description="Complete Blood Count" sticker_req_flag="Y"
+        is_active="Y" active_begin="2025-01-01 12:00:00"
+        active_end="2025-12-31 12:00:00" is_reportable="N" time_holding="30"
+        time_wait="15" time_ta_average="60" time_ta_warning="90"
+        time_ta_max="120" label_qty="1" lastupdated="2025-03-20 12:00:00"
+        local_code="CBC" sort_order="2147483646" name="Complete Blood Count"
+        orderable="true" guid="abc-123" antimicrobial_resistance="true" />
+
+    <analyzer id="2001" name="Cobas 6800"
+        machine_id="COBAS6800-001" analyzer_type="MOLECULAR"
+        description="Automated molecular analyzer for PCR testing"
+        location="Main Laboratory - Room 101" is_active="true"
+        has_setup_page="true" last_updated="2023-01-01 12:00:00" />
+
+    <type_of_sample id="9310" description="Whole Blood"
+        domain="H" name_localization_id="9301" lastupdated="2023-12-01 12:00:00" />
+
+    <sampletype_test id="9320" sample_type_id="9310" test_id="4001" />
+
+    <!-- id=3010: walk-up analyzer result. The bridge filled the accession
+         slot with the patient MRN (HL7ResultParser PID-3/PID-2 fallback) —
+         no LIS order exists for it. -->
+    <analyzer_results id="3010" analyzer_id="2001"
+        accession_number="WALKUP01" test_name="Potassium" result="4.1"
+        units="mmol/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
+        read_only="false" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N"
+        test_id="4001" />
+
+    <!-- id=3011: a second walk-up arrival for the same MRN-accession,
+         staged after the first was accepted (find-or-attach leg). -->
+    <analyzer_results id="3011" analyzer_id="2001"
+        accession_number="WALKUP01" test_name="Potassium" result="5.2"
+        units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
+        read_only="false" positive="false"
+        complete_date="2025-07-02 08:00:00" test_result_type="N"
+        test_id="4001" />
+
+    <!-- id=3020: QC result — control accessions never have an order, so
+         control groups must stay exempt from the gate. -->
+    <analyzer_results id="3020" analyzer_id="2001"
+        accession_number="QC-LOT-7" test_name="Potassium" result="4.0"
+        units="mmol/L" iscontrol="true" last_updated="2025-07-01 08:00:00"
+        read_only="false" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N"
+        test_id="4001" />
+
+    <!-- Status reference rows so the confirmed-accept tests can run the full
+         persist path: StatusService maps these by NAME + STATUS_TYPE
+         (buildStatusToIdMaps), and BaseWebContextSensitiveTest refreshes the
+         cache after every dataset load. -->
+    <status_of_sample id="941"
+        description="Testing Started" code="41" status_type="ORDER"
+        lastupdated="2025-03-18" name="Testing Started"
+        display_key="status_testing_started" is_active="Y" />
+    <status_of_sample id="942"
+        description="Sample Entered" code="42" status_type="SAMPLE"
+        lastupdated="2025-03-18" name="SampleEntered"
+        display_key="status_sample_entered" is_active="Y" />
+    <status_of_sample id="943"
+        description="Technical Acceptance" code="43" status_type="ANALYSIS"
+        lastupdated="2025-03-18" name="Technical Acceptance"
+        display_key="status_tech_accept" is_active="Y" />
+    <status_of_sample id="944"
+        description="Technical Rejected" code="44" status_type="ANALYSIS"
+        lastupdated="2025-03-18" name="Technical Rejected"
+        display_key="status_tech_reject" is_active="Y" />
+
+    <!-- Record-status machinery: persistRecordStatusForSample writes
+         ObservationHistory rows typed SampleRecordStatus/PatientRecordStatus
+         whose value is the REC_STATUS dictionary id for NotRegistered
+         ("Not Start" local abbreviation) — and the second-arrival gate test
+         reads them back through getStatusSetForAccessionNumber. -->
+    <observation_history_type id="951"
+        type_name="SampleRecordStatus"
+        description="Sample record status"
+        lastupdated="2025-03-18" />
+    <observation_history_type id="952"
+        type_name="PatientRecordStatus"
+        description="Patient record status"
+        lastupdated="2025-03-18" />
+
+    <dictionary_category id="961"
+        description="Record status" local_Abbrev="RECST"
+        name="REC_STATUS" lastUpdated="2025-03-18 12:00:00" />
+    <dictionary id="962" is_active="Y"
+        dict_entry="Not Registered" local_Abbrev="Not Start"
+        dictionary_category_id="961" sort_order="1"
+        lastUpdated="2025-03-18 12:00:00" />
+
+    <!-- A human-entered sample: its accession must never be gated. -->
+    <status_of_sample id="931"
+        description="Sample entered" code="93" status_type="SampleType"
+        lastupdated="2025-03-18" name="Entered 931"
+        display_key="sample_display_key_931" is_active="Y" />
+
+    <sample id="9330" accession_number="ORDERED01" status_id="931"
+        received_date="2025-07-01 00:00:00.0"
+        entered_date="2025-07-01 00:00:00.0"
+        collection_date="2025-07-01 00:00:00.0"
+        lastupdated="2025-07-01 12:00:00" />
+</dataset>

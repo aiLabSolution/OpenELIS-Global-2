@@ -15,6 +15,7 @@ import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
+import org.openelisglobal.autoverification.service.AutoverificationGateService;
 import org.openelisglobal.common.action.IActionConstants;
 import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.services.IStatusService;
@@ -96,6 +97,8 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
     private IStatusService statusService;
     @Autowired
     private ResultLimitService resultLimitService;
+    @Autowired
+    private AutoverificationGateService autoverificationGateService;
 
     // ---------------------------------------------------------------
     // Public entry point
@@ -111,6 +114,7 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
 
         hydrateStagingFlags(actionableResults);
         resolveLinkedCorrections(actionableResults);
+        gateUnmatchedSampleGroups(actionableResults);
 
         // Remove actionable items from the remaining list so we can detect
         // childless controls among the leftovers.
@@ -134,6 +138,20 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         }
 
         analyzerResultsService.persistAnalyzerResults(deletableAnalyzerResults, sampleGroupList, sysUserId);
+
+        // LIS-55: autoverification gate runs after the accept transaction has
+        // committed. Fail-safe by construction — if the gate errors, accepted
+        // analyses simply remain at TechnicalAcceptance in the human
+        // validation queue, exactly as before the gate existed. An accept is
+        // never rolled back by a gate failure.
+        try {
+            autoverificationGateService.evaluateAndFinalize(sampleGroupList, sysUserId);
+        } catch (RuntimeException e) {
+            LogEvent.logError(this.getClass().getSimpleName(), "acceptAndPersist",
+                    "Autoverification gate failed — accepted results remain held for human validation: "
+                            + e.getMessage());
+            LogEvent.logError(e);
+        }
     }
 
     // ---------------------------------------------------------------
@@ -396,6 +414,77 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             return GroupAction.REJECT;
         }
         return GroupAction.ACCEPT;
+    }
+
+    // ---------------------------------------------------------------
+    // Unmatched-sample gate (LIS-126)
+    // ---------------------------------------------------------------
+
+    private static final String UNMATCHED_ACTION_ACCEPT_UNKNOWN = "ACCEPT_UNKNOWN";
+
+    @Override
+    public boolean requiresUnmatchedConfirmation(String accessionNumber) {
+        StatusSet statusSet = statusService.getStatusSetForAccessionNumber(accessionNumber);
+        if (noEntryDone(statusSet, accessionNumber)) {
+            return true;
+        }
+        return statusSet
+                .getSampleRecordStatus() == org.openelisglobal.common.services.StatusService.RecordStatus.NotRegistered
+                && statusSet
+                        .getPatientRecordStatus() == org.openelisglobal.common.services.StatusService.RecordStatus.NotRegistered;
+    }
+
+    /**
+     * Blocks accept of any grouping whose accession resolves to no human-verified
+     * patient identity unless the technician explicitly chose to commit it under
+     * the unidentified-patient placeholder
+     * ({@code unmatchedAction=ACCEPT_UNKNOWN}); the confirmed decision is
+     * audit-noted on every reportable row. The gate covers both the find-or-create
+     * leg ({@code createGroupForNoSampleEntryDone} minting a new Unknown-patient
+     * sample) and the find-or-attach leg
+     * ({@code createGroupForPreviousAnalyzerDone} adding to a sample a previous
+     * analyzer accept created). Rejections and deletions report no live value and
+     * are never blocked; control (QC) groups are exempt — their accessions never
+     * correspond to an order, and {@code isControl} is hydrated from the DB so the
+     * exemption cannot be forged by the client.
+     */
+    void gateUnmatchedSampleGroups(List<AnalyzerResultItem> items) {
+        Map<Integer, List<AnalyzerResultItem>> groupedByNumber = new LinkedHashMap<>();
+        for (AnalyzerResultItem item : items) {
+            groupedByNumber.computeIfAbsent(item.getSampleGroupingNumber(), k -> new ArrayList<>()).add(item);
+        }
+
+        List<String> unconfirmed = new ArrayList<>();
+
+        for (List<AnalyzerResultItem> group : groupedByNumber.values()) {
+            if (resolveGroupAction(group) != GroupAction.ACCEPT) {
+                continue;
+            }
+            if (group.stream().allMatch(AnalyzerResultItem::getIsControl)) {
+                continue;
+            }
+            String accessionNumber = group.get(0).getAccessionNumber();
+            if (!requiresUnmatchedConfirmation(accessionNumber)) {
+                continue;
+            }
+
+            boolean confirmed = group.stream()
+                    .anyMatch(item -> UNMATCHED_ACTION_ACCEPT_UNKNOWN.equals(item.getUnmatchedAction()));
+            if (!confirmed) {
+                unconfirmed.add(accessionNumber);
+                continue;
+            }
+            for (AnalyzerResultItem item : group) {
+                if (!item.isReadOnly() && !item.getIsControl()) {
+                    appendAutoNote(item, "note.analyzer.unmatched.acceptedUnknown", accessionNumber, item.getResult());
+                }
+            }
+        }
+
+        if (!unconfirmed.isEmpty()) {
+            throw new UnmatchedSampleException(MessageUtil.getMessage("error.analyzer.unmatched.unconfirmed",
+                    new String[] { String.join("; ", unconfirmed) }));
+        }
     }
 
     private void appendAutoNote(AnalyzerResultItem item, String messageKey, String... args) {

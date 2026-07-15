@@ -8,6 +8,7 @@ import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.dao.AnalyzerResultsDAO;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
+import org.openelisglobal.common.exception.LIMSDuplicateRecordException;
 import org.openelisglobal.common.exception.LIMSRuntimeException;
 import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.service.AuditableBaseObjectServiceImpl;
@@ -275,7 +276,18 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
 
                 if (note != null) {
                     note.setReferenceId(result.getId());
-                    noteService.insert(note);
+                    try {
+                        noteService.insert(note);
+                    } catch (LIMSDuplicateRecordException e) {
+                        // An identical note already sits on this result — a
+                        // re-accepted analyzer row whose auto-note (LIS-158
+                        // corrections, LIS-126 unmatched confirmations) came out
+                        // byte-identical. The audit record is already in place;
+                        // failing the whole accept over it would 500 a
+                        // legitimate re-accept.
+                        LogEvent.logWarn(this.getClass().getSimpleName(), "insertResults",
+                                "skipped duplicate note on result " + result.getId() + ": " + e.getMessage());
+                    }
                 }
             }
         }

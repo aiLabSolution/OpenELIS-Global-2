@@ -55,4 +55,12 @@ public interface QCResultDAO extends BaseDAO<QCResult, String> {
      * Get all distinct instrument IDs that have QC results.
      */
     List<String> findDistinctInstrumentIds() throws LIMSRuntimeException;
+
+    /**
+     * Get QC results for an (instrument, test) pair whose resultStatus is still
+     * PENDING — i.e. the Westgard evaluation listener has not classified them yet.
+     * The autoverification gate (LIS-55) fails closed on these: a run whose
+     * evaluation has not finished is not yet known to be in control.
+     */
+    List<QCResult> findPendingByInstrumentAndTest(String instrumentId, String testId) throws LIMSRuntimeException;
 }
