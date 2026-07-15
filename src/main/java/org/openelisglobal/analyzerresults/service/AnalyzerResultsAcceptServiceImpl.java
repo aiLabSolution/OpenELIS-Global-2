@@ -1,6 +1,7 @@
 package org.openelisglobal.analyzerresults.service;
 
 import java.sql.Date;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -274,6 +275,14 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             item.setLoinc(entity.getLoinc());
             item.setUcumValue(entity.getUcumValue());
             item.setNormalizationStatus(entity.getNormalizationStatus());
+            // the staging row's true completeDate, for the LIS-128 cross-day
+            // linked-correction guard. This overwrite is UNCONDITIONAL and happens
+            // before any read — that is the guard's tamper defense: the REST accept
+            // path binds the posted JSON via Jackson (@RequestBody), which ignores
+            // the controller's setAllowedFields, so a posted
+            // completeDate/stagingCompleteDate can land on the item and must never
+            // be trusted.
+            item.setStagingCompleteDate(entity.getCompleteDate());
         }
     }
 
@@ -285,6 +294,25 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
      * linked correction without a decision. Rejected/deleted groupings are never
      * blocked: a correction that is rejected or deleted along with its group is
      * audit-trailed, not silently reported.
+     *
+     * <p>
+     * LIS-128 cross-day guard: a linked pair whose two staging rows'
+     * {@code completeDate} fall on different calendar days (server default
+     * timezone) indicates a reused accession number — a genuine analyzer corrected
+     * re-export lands same-day — so USE is refused fail-closed rather than
+     * committing another day's (another patient's) value onto this row. DISMISS
+     * remains the resolution path: it commits the original and audit-notes the
+     * discarded value. The comparison uses the DB-hydrated
+     * {@code stagingCompleteDate} ({@link #hydrateStagingFlags}), never the posted
+     * {@code completeDate}. A null completeDate on either side carries no signal
+     * and does not block (current behavior preserved). The orphan corner — the
+     * backlinked original invisible to {@code findPartner} because it is itself
+     * readOnly (e.g. an unmapped row forced readOnly at hydration) — is guarded
+     * too, via a DB lookup of the backlinked staging row's completeDate. Residual:
+     * a same-day two-patient collision under a sentinel accession carries no
+     * distinguishing signal in staging (no patient dimension) and is not detectable
+     * here.
+     * </p>
      */
     void resolveLinkedCorrections(List<AnalyzerResultItem> items) {
         Map<Integer, List<AnalyzerResultItem>> groupedByNumber = new LinkedHashMap<>();
@@ -293,6 +321,7 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         }
 
         List<String> unresolved = new ArrayList<>();
+        List<String> crossDay = new ArrayList<>();
 
         for (List<AnalyzerResultItem> group : groupedByNumber.values()) {
             GroupAction groupAction = resolveGroupAction(group);
@@ -330,9 +359,28 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
                     }
                     AnalyzerResultItem partner = findPartner(group, item);
                     if (partner == null) {
+                        // The backlinked original may itself be readOnly (hydration
+                        // forces readOnly when the row is unmapped, testId null) and
+                        // thus invisible to findPartner — the cross-day guard must
+                        // still see it, so check the staging row behind the backlink
+                        // before treating this as a plain orphan.
+                        AnalyzerResults linkedOriginal = GenericValidator
+                                .isBlankOrNull(item.getDuplicateAnalyzerResultId()) ? null
+                                        : analyzerResultsService
+                                                .readAnalyzerResults(item.getDuplicateAnalyzerResultId());
+                        if (linkedOriginal != null
+                                && isCrossDay(item.getStagingCompleteDate(), linkedOriginal.getCompleteDate())) {
+                            crossDay.add(item.getAccessionNumber() + " : " + item.getTestName());
+                            continue;
+                        }
                         // orphan correction — its own group header, the original is gone
                         appendAutoNote(item, "note.analyzer.correction.applied.orphan", item.getResult());
                         item.setReadOnly(false);
+                    } else if (isCrossDayPair(item, partner)) {
+                        // LIS-128: different calendar days = reused-accession signature,
+                        // not an analyzer correction — refuse USE fail-closed, leave the
+                        // partner unconsumed and all staging rows intact
+                        crossDay.add(item.getAccessionNumber() + " : " + item.getTestName());
                     } else if (!usedPartners.add(partner)) {
                         // two corrections both USE onto the same original is ambiguous
                         unresolved.add(item.getAccessionNumber() + " : " + item.getTestName());
@@ -356,6 +404,10 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             }
         }
 
+        if (!crossDay.isEmpty()) {
+            throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.correction.crossday",
+                    new String[] { String.join("; ", crossDay) }));
+        }
         if (!unresolved.isEmpty()) {
             throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.correction.unresolved",
                     new String[] { String.join("; ", unresolved) }));
@@ -364,6 +416,26 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
 
     private boolean isLinkedCorrection(AnalyzerResultItem item) {
         return item.isReadOnly() && !GenericValidator.isBlankOrNull(item.getDuplicateAnalyzerResultId());
+    }
+
+    /**
+     * True when the correction and its partner completed on different calendar days
+     * (server default timezone) per their DB-hydrated staging completeDates. Null
+     * on either side = no signal = no block.
+     */
+    private boolean isCrossDayPair(AnalyzerResultItem correction, AnalyzerResultItem partner) {
+        return isCrossDay(correction.getStagingCompleteDate(), partner.getStagingCompleteDate());
+    }
+
+    /**
+     * True when the two timestamps fall on different calendar days (server default
+     * timezone). Null on either side = no signal = no block.
+     */
+    private static boolean isCrossDay(Timestamp a, Timestamp b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        return !a.toLocalDateTime().toLocalDate().equals(b.toLocalDateTime().toLocalDate());
     }
 
     /**
