@@ -1,7 +1,7 @@
 <dataset>
-    <!-- LIS-158: linked-correction accept/resolve fixtures. Test 4001 and
-         analyzer 2001 are copied verbatim from analyzer-results.xml so the
-         analyzer_results FKs resolve. -->
+    <!-- LIS-158: linked-correction accept/resolve fixtures. Test 4001 and analyzer
+        2001 are copied verbatim from analyzer-results.xml so the analyzer_results
+        FKs resolve. -->
     <test id="4001" description="Blood Test" loinc="123456"
         reporting_description="Complete Blood Count" sticker_req_flag="Y"
         is_active="Y" active_begin="2025-01-01 12:00:00"
@@ -33,11 +33,11 @@
         complete_date="2025-07-02 08:00:00" test_result_type="N"
         test_id="4001" />
 
-    <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id) —
-         must never be treated as a linked correction / must never block accept -->
+    <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id)
+        — must never be treated as a linked correction / must never block accept -->
     <analyzer_results id="1012" analyzer_id="2001"
-        accession_number="MISS200" test_name="Unmapped" result="99"
-        units="" iscontrol="false" last_updated="2025-07-01 08:00:00"
-        read_only="true" positive="false"
-        complete_date="2025-07-01 08:00:00" test_result_type="N" />
+        accession_number="MISS200" test_name="Unmapped" result="99" units=""
+        iscontrol="false" last_updated="2025-07-01 08:00:00" read_only="true"
+        positive="false" complete_date="2025-07-01 08:00:00"
+        test_result_type="N" />
 </dataset>
