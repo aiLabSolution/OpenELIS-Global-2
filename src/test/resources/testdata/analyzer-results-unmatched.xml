@@ -34,16 +34,21 @@
     <analyzer_results id="3010" analyzer_id="2001"
         accession_number="WALKUP01" test_name="Potassium" result="4.1"
         units="mmol/L" iscontrol="false" last_updated="2025-07-01 08:00:00"
-        read_only="false" positive="false" complete_date="2025-07-01 08:00:00"
-        test_result_type="N" test_id="4001" />
+        read_only="false" positive="false"
+        complete_date="2025-07-01 08:00:00" test_result_type="N"
+        test_id="4001" raw_code="K" raw_unit="mmol/L"
+        loinc="2823-3" ucum_value="mmol/L"
+        normalization_status="NORMALIZED" />
 
     <!-- id=3011: a second walk-up arrival for the same MRN-accession, staged
         after the first was accepted (find-or-attach leg). -->
     <analyzer_results id="3011" analyzer_id="2001"
         accession_number="WALKUP01" test_name="Potassium" result="5.2"
         units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
-        read_only="false" positive="false" complete_date="2025-07-02 08:00:00"
-        test_result_type="N" test_id="4001" />
+        read_only="false" positive="false"
+        complete_date="2025-07-02 08:00:00" test_result_type="N"
+        test_id="4001" raw_code="K-SECOND" raw_unit="mEq/L"
+        loinc="2823-3" normalization_status="PARTIAL" />
 
     <!-- id=3020: QC result — control accessions never have an order, so control
         groups must stay exempt from the gate. -->
