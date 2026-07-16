@@ -34,6 +34,7 @@ import org.openelisglobal.analyzer.valueholder.Analyzer.AnalyzerStatus;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsService;
 import org.openelisglobal.analyzerresults.valueholder.AnalyzerResults;
 import org.openelisglobal.common.log.LogEvent;
+import org.openelisglobal.common.util.StringUtil;
 import org.openelisglobal.test.service.TestService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -907,7 +908,10 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
      */
     private void processQCAnalyzerResult(AnalyzerResults ar, Analyzer analyzer) {
         try {
-            BigDecimal resultValue = new BigDecimal(ar.getResult());
+            // An off-scale qualified control value (<0.008, >=500) carries a
+            // comparator; strip it so Westgard math sees the magnitude rather than
+            // throwing and dropping the control out of QC processing (LIS-252).
+            BigDecimal resultValue = new BigDecimal(StringUtil.stripLeadingComparator(ar.getResult()));
             LocalDateTime timestamp = ar.getCompleteDate() != null
                     ? ar.getCompleteDate().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()
                     : LocalDateTime.now();

@@ -169,4 +169,50 @@ public class StringUtilTest {
     public void doubleWithSignificantDigits_string_two_shouldFormatToTwoDecimals() {
         assertEquals("45.70", StringUtil.doubleWithSignificantDigits(45.7, "2"));
     }
+
+    // LIS-252: off-scale qualified results (<0.008, >1000, <=0.01, >=500, ≤/≥)
+
+    @Test
+    public void getActualNumericValue_shouldStripEveryComparatorToTheMagnitude() {
+        assertEquals("0.008", StringUtil.getActualNumericValue("<0.008"));
+        assertEquals("1000", StringUtil.getActualNumericValue(">1000"));
+        // "<=" and ">=" used to leave a leading "=" and return "NaN" -> BigDecimal
+        // crash
+        assertEquals("0.01", StringUtil.getActualNumericValue("<=0.01"));
+        assertEquals("500", StringUtil.getActualNumericValue(">=500"));
+        assertEquals("0.01", StringUtil.getActualNumericValue("≤0.01"));
+        assertEquals("500", StringUtil.getActualNumericValue("≥500"));
+    }
+
+    @Test
+    public void getActualNumericValue_shouldLeaveOrdinaryNumericsUnchanged() {
+        assertEquals("2.31", StringUtil.getActualNumericValue("2.31"));
+        assertEquals("-5", StringUtil.getActualNumericValue("-5"));
+    }
+
+    @Test
+    public void getActualNumericValue_shouldReturnNaNForGenuineText() {
+        assertEquals("NaN", StringUtil.getActualNumericValue("Detected"));
+        assertEquals("NaN", StringUtil.getActualNumericValue("<"));
+    }
+
+    @Test
+    public void getLeadingComparator_shouldNormalizeToAsciiFhirCode() {
+        assertEquals("<", StringUtil.getLeadingComparator("<0.008"));
+        assertEquals(">", StringUtil.getLeadingComparator(">1000"));
+        assertEquals("<=", StringUtil.getLeadingComparator("<=0.01"));
+        assertEquals(">=", StringUtil.getLeadingComparator(">=500"));
+        assertEquals("<=", StringUtil.getLeadingComparator("≤0.01"));
+        assertEquals(">=", StringUtil.getLeadingComparator("≥500"));
+        assertEquals(null, StringUtil.getLeadingComparator("2.31"));
+        assertEquals(null, StringUtil.getLeadingComparator(null));
+    }
+
+    @Test
+    public void stripLeadingComparator_shouldRemoveOnlyTheLeadingComparator() {
+        assertEquals("0.008", StringUtil.stripLeadingComparator("<0.008"));
+        assertEquals("0.01", StringUtil.stripLeadingComparator("<=0.01"));
+        assertEquals("500", StringUtil.stripLeadingComparator("≥500"));
+        assertEquals("2.31", StringUtil.stripLeadingComparator("2.31"));
+    }
 }
