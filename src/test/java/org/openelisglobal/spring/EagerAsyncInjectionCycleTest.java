@@ -59,6 +59,15 @@ import org.springframework.stereotype.Component;
  * ones), and fails on any cycle that contains a bean declaring {@code @Async}.
  *
  * <p>
+ * Modeled subset: {@code @Autowired} field/setter/constructor injection into
+ * component-scanned classes under {@code org.openelisglobal}. NOT modeled:
+ * {@code @Bean} factory methods, {@code @Resource}/{@code @Inject} injection
+ * points, XML-defined beans, {@code Optional<T>} wrappers, and beans outside
+ * the base package (all verified absent from the graph at the time of writing)
+ * — the Stage-4 clean-box smoke remains the authority for the fully assembled
+ * production graph.
+ *
+ * <p>
  * If this test fails, break the cycle: prefer removing the offending
  * dependency, otherwise mark ONE edge of the cycle {@code @Lazy} (see
  * {@code FhirReferralServiceImpl.fhirTransformService} for the precedent).
@@ -262,7 +271,23 @@ public class EagerAsyncInjectionCycleTest {
     // ------------------------------------------------------------------
 
     private boolean declaresAsync(Class<?> bean) {
-        for (Class<?> c = bean; c != null && c != Object.class; c = c.getSuperclass()) {
+        // Spring's async advisor matches the target class AND its interfaces
+        // (AopUtils.canApply), so an @Async declared only on an implemented
+        // interface still gets the bean proxied — walk both hierarchies.
+        Set<Class<?>> types = new HashSet<>();
+        Deque<Class<?>> queue = new ArrayDeque<>();
+        queue.add(bean);
+        while (!queue.isEmpty()) {
+            Class<?> c = queue.poll();
+            if (c == Object.class || !types.add(c)) {
+                continue;
+            }
+            if (c.getSuperclass() != null) {
+                queue.add(c.getSuperclass());
+            }
+            queue.addAll(List.of(c.getInterfaces()));
+        }
+        for (Class<?> c : types) {
             if (c.isAnnotationPresent(Async.class)) {
                 return true;
             }
