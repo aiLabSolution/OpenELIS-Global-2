@@ -32,14 +32,27 @@ public class ResultValidationServiceImpl implements ResultValidationService {
     private NoteService noteService;
     private SampleService sampleService;
     private TestNotificationService testNotificationService;
+    private IStatusService statusService;
 
     public ResultValidationServiceImpl(AnalysisService analysisService, ResultService resultService,
-            NoteService noteService, SampleService sampleService, TestNotificationService testNotificationService) {
+            NoteService noteService, SampleService sampleService, TestNotificationService testNotificationService,
+            IStatusService statusService) {
         this.analysisService = analysisService;
         this.resultService = resultService;
         this.noteService = noteService;
         this.sampleService = sampleService;
         this.testNotificationService = testNotificationService;
+        this.statusService = statusService;
+    }
+
+    @Override
+    public void markAnalysisReleased(Analysis analysis, String sysUserId) {
+        // Same transition the autoverification gate performs system-side
+        // (AutoverificationGateServiceImpl#autoFinalize) — the two must stay in
+        // lock-step for the released-state contract (Finalized + releasedDate).
+        analysis.setSysUserId(sysUserId);
+        analysis.setStatusId(statusService.getStatusID(AnalysisStatus.Finalized));
+        analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
     }
 
     @Override

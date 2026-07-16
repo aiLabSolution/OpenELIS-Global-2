@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<dataset>
+    <!-- LIS-56 pathologist release component fixtures. Static catalog shapes
+        only (mirroring autoverification-gate.xml); the sample/analysis chain is
+        seeded by the test via raw SQL because its status_id FKs use status rows
+        resolved at run time, and the pathologist system_user is inserted idempotently
+        (history rows referencing it are append-only). Ids live in the 82xx range,
+        accessions under LIS56. -->
+
+    <localization id="8210" description="Test Name"
+        lastupdated="2026-07-16 08:00:00" />
+
+    <test id="8211" description="Potassium LIS56" loinc="2823-3"
+        reporting_description="Potassium LIS56" sticker_req_flag="Y"
+        is_active="Y" active_begin="2025-01-01 12:00:00"
+        active_end="2027-12-31 12:00:00" is_reportable="Y" time_holding="30"
+        time_wait="15" time_ta_average="60" time_ta_warning="90"
+        time_ta_max="120" label_qty="1" lastupdated="2026-07-16 08:00:00"
+        local_code="KLIS56" sort_order="2147483630" name="Potassium LIS56"
+        orderable="true" guid="lis56-8211-guid" name_localization_id="8210" />
+
+    <type_of_sample id="8215" description="Serum LIS56"
+        domain="H" name_localization_id="8210"
+        lastupdated="2026-07-16 08:00:00" />
+</dataset>

@@ -63,6 +63,7 @@ import org.openelisglobal.testresult.valueholder.TestResult;
 import org.openelisglobal.typeoftestresult.service.TypeOfTestResultServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.Errors;
@@ -257,6 +258,17 @@ public class AccessionValidationRestController extends BaseResultValidationContr
         return validationStatus;
     }
 
+    /**
+     * LIS-56: release authority. Accepting a held/flagged result finalizes it —
+     * that authority belongs to the named pathologist login (RA 4688 / RA 5527), so
+     * the save is role-gated; everyone else gets 403. The seeded "Pathologist" role
+     * normalizes to ROLE_PATHOLOGIST for form and SSO logins alike
+     * (CustomUserDetailsService.toRoleAuthority). The legacy module interceptor
+     * does NOT cover this endpoint (no system_module_url row for the /rest path —
+     * it fail-opens for any authenticated user), so this annotation is the only
+     * gate on the release action.
+     */
+    @PreAuthorize("hasRole('PATHOLOGIST')")
     @PostMapping(value = "AccessionValidation", produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public ResultValidationForm showAccessionValidationRangeSave(HttpServletRequest request,
@@ -411,9 +423,7 @@ public class AccessionValidationRestController extends BaseResultValidationContr
                 if (!analysisIdList.contains(analysis.getId())) {
 
                     if (analysisItem.getIsAccepted()) {
-                        analysis.setStatusId(
-                                SpringContext.getBean(IStatusService.class).getStatusID(AnalysisStatus.Finalized));
-                        analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
+                        resultValidationService.markAnalysisReleased(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }

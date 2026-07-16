@@ -64,6 +64,7 @@ import org.openelisglobal.testresult.service.TestResultService;
 import org.openelisglobal.testresult.valueholder.TestResult;
 import org.openelisglobal.typeoftestresult.service.TypeOfTestResultServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.Errors;
@@ -210,6 +211,9 @@ public class ResultValidationController extends BaseResultValidationController {
         return validationStatus;
     }
 
+    // LIS-56: release authority — same gate as the REST save; see
+    // AccessionValidationRestController#showAccessionValidationRangeSave.
+    @PreAuthorize("hasRole('PATHOLOGIST')")
     @RequestMapping(value = "/ResultValidation", method = RequestMethod.POST)
     public ModelAndView showResultValidationSave(HttpServletRequest request,
             @ModelAttribute("form") @Validated(ResultValidationForm.ResultValidation.class) ResultValidationForm form,
@@ -385,9 +389,7 @@ public class ResultValidationController extends BaseResultValidationController {
                 if (!analysisIdList.contains(analysis.getId())) {
 
                     if (analysisItem.getIsAccepted()) {
-                        analysis.setStatusId(
-                                SpringContext.getBean(IStatusService.class).getStatusID(AnalysisStatus.Finalized));
-                        analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
+                        resultValidationService.markAnalysisReleased(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }
