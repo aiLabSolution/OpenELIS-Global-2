@@ -234,6 +234,7 @@
   "analyzer.errorDetails.subtitle": "错误详细信息",
   "analyzer.errorDetails.timestamp": "时间",
   "analyzer.errorDetails.title": "错误详情",
+  "analyzer.fhirImport.error.fieldTooLong": "Field {field} exceeds maximum length {maxLength} characters (got {actualLength})",
   "analyzer.fhirImport.error.importFailed": "FHIR数据导入失败",
   "analyzer.fhirImport.error.invalidBundleType": "FHIR Bundle类型无效",
   "analyzer.fhirImport.error.noObservations": "FHIR Bundle中无检验观测数据",

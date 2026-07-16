@@ -234,6 +234,7 @@
   "analyzer.errorDetails.subtitle": "Detailed information and analyzer logs for error {id}",
   "analyzer.errorDetails.timestamp": "Timestamp",
   "analyzer.errorDetails.title": "Error Details",
+  "analyzer.fhirImport.error.fieldTooLong": "Field {field} exceeds maximum length {maxLength} characters (got {actualLength})",
   "analyzer.fhirImport.error.importFailed": "FHIR bundle import failed",
   "analyzer.fhirImport.error.invalidBundleType": "Bundle type must be 'transaction' or 'batch', got: {bundleType}",
   "analyzer.fhirImport.error.noObservations": "Bundle contains no Observation resources with results",

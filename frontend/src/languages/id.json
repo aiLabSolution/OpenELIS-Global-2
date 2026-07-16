@@ -234,6 +234,7 @@
   "analyzer.errorDetails.subtitle": "RIncian informasi error dan log alat {id}",
   "analyzer.errorDetails.timestamp": "Stempel Waktu",
   "analyzer.errorDetails.title": "Rincian Error",
+  "analyzer.fhirImport.error.fieldTooLong": "Field {field} exceeds maximum length {maxLength} characters (got {actualLength})",
   "analyzer.fhirImport.error.importFailed": "Gagal mengimpor FHIR bundle",
   "analyzer.fhirImport.error.invalidBundleType": "Jenis bundle harus berupa 'transaksi' atau 'batch', yang ditampilkan: {bundleType}",
   "analyzer.fhirImport.error.noObservations": "Bundle tidak memiliki Observation dengan hasil",

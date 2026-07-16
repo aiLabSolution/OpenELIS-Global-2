@@ -278,6 +278,16 @@ public class AnalyzerResultsServiceImplTest {
     }
 
     @Test
+    public void patientHintsConflict_trimsBeforeCompare() {
+        // LIS-244: whitespace variance between an original and a re-export is
+        // not a patient mismatch. Rows staged before the boundary trim landed
+        // can still carry padding, so the predicate trims defensively too.
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict("PAT-A ", "PAT-A"));
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict(" PAT-A", "PAT-A "));
+        assertTrue(AnalyzerResultsServiceImpl.patientHintsConflict("PAT-A ", " PAT-B"));
+    }
+
+    @Test
     public void reImport_bothNullDates_sameValue_skipsAsTrueReImport() {
         // Timestamp-less analyzers: null completeDate on both sides + equal value
         // is the closest thing to an idempotency key the wire offers — skip.

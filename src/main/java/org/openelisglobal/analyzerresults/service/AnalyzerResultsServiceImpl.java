@@ -214,15 +214,17 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
      * True when two staging patient hints positively identify DIFFERENT patients:
      * both non-blank and unequal. A null/blank hint on either side carries no
      * signal — pre-migration rows and sources without a wire patient identity must
-     * neither block nor break idempotency (LIS-239). Shared by the insert dedupe
-     * above and the accept-boundary USE guard
-     * (AnalyzerResultsAcceptServiceImpl.resolveLinkedCorrections).
+     * neither block nor break idempotency (LIS-239). Compared trimmed: the import
+     * boundary now stores hints trimmed, but rows staged before that landed can
+     * still carry padding, and whitespace variance is not a patient mismatch
+     * (LIS-244). Shared by the insert dedupe above and the accept-boundary USE
+     * guard (AnalyzerResultsAcceptServiceImpl.resolveLinkedCorrections).
      */
     static boolean patientHintsConflict(String a, String b) {
         if (GenericValidator.isBlankOrNull(a) || GenericValidator.isBlankOrNull(b)) {
             return false;
         }
-        return !a.equals(b);
+        return !a.trim().equals(b.trim());
     }
 
     @Override

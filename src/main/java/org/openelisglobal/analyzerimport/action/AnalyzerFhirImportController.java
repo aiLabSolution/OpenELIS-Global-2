@@ -271,6 +271,18 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
 
             return ResponseEntity.ok(response);
 
+        } catch (FieldTooLongException e) {
+            // Identity-bearing wire value exceeds its staging column — reject the
+            // bundle (400) instead of letting the insert fail with a 500 the
+            // bridge would retry forever. 4xx is non-retryable bridge-side: the
+            // bundle dead-letters to its rejected-bundles surface for an operator.
+            LogEvent.logWarn(CLASS_NAME, "importFhirBundle", "Rejecting bundle: " + e.getMessage());
+            response.put("success", false);
+            response.put("error", "analyzer.fhirImport.error.fieldTooLong");
+            response.put("errorKey", "analyzer.fhirImport.error.fieldTooLong");
+            response.put("errorArgs", Map.of("field", e.field, "maxLength", String.valueOf(e.maxLength), "actualLength",
+                    String.valueOf(e.actualLength)));
+            return ResponseEntity.badRequest().body(response);
         } catch (Exception e) {
             LogEvent.logError(e);
             LogEvent.logError(CLASS_NAME, "importFhirBundle",
@@ -359,7 +371,9 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
     /**
      * The wire patient identity the bridge stamped on this Patient resource — the
      * identifier under {@link #ANALYZER_PATIENT_ID_SYSTEM}, falling back to the
-     * first identifier with a value. Null (never blank) when none.
+     * first identifier with a value. Trimmed — whitespace variance between an
+     * original and a re-export must not read as a patient mismatch (LIS-244). Null
+     * (never blank) when none.
      */
     private String findAnalyzerPatientId(Patient patient) {
         String fallback = null;
@@ -368,13 +382,48 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
                 continue;
             }
             if (ANALYZER_PATIENT_ID_SYSTEM.equals(identifier.getSystem())) {
-                return identifier.getValue();
+                return identifier.getValue().trim();
             }
             if (fallback == null) {
-                fallback = identifier.getValue();
+                fallback = identifier.getValue().trim();
             }
         }
         return fallback;
+    }
+
+    /**
+     * Truncate a signal-only wire value to its staging column width, logging what
+     * was dropped. Over-length values otherwise fail the whole bundle insert, which
+     * the bridge retries forever (LIS-244). Never used for identity-bearing fields
+     * — those reject via {@link FieldTooLongException} instead.
+     */
+    private static String truncateForStaging(String value, int maxLength, String field, String accession) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        LogEvent.logWarn(CLASS_NAME, "truncateForStaging", "Truncating over-length " + field + " (" + value.length()
+                + " > " + maxLength + " chars) for accession=" + accession);
+        return value.substring(0, maxLength);
+    }
+
+    /**
+     * An identity-bearing wire value exceeds its staging column width — the bundle
+     * must be rejected with a 400 naming the field, not truncated (truncation would
+     * change matching semantics) and not left to fail the insert (a 500 the bridge
+     * retries forever).
+     */
+    private static class FieldTooLongException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private final String field;
+        private final int maxLength;
+        private final int actualLength;
+
+        FieldTooLongException(String field, int maxLength, int actualLength) {
+            super(field + " length " + actualLength + " exceeds column width " + maxLength);
+            this.field = field;
+            this.maxLength = maxLength;
+            this.actualLength = actualLength;
+        }
     }
 
     private AnalyzerResults mapObservationToAnalyzerResult(Observation obs, Map<String, String> specimenAccessions,
@@ -402,9 +451,12 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
 
         // Wire patient identity from the subject's in-bundle Patient (LIS-239).
         // Absent subject/Patient/identifier → null: a null hint carries no
-        // signal and never blocks downstream.
+        // signal and never blocks downstream. Comparison-only signal, so an
+        // over-length value truncates — originals and re-exports pass through
+        // this same boundary and truncate identically (LIS-244).
         if (obs.hasSubject() && obs.getSubject().hasReference()) {
-            ar.setPatientHint(patientIdentifiers.get(obs.getSubject().getReference()));
+            ar.setPatientHint(truncateForStaging(patientIdentifiers.get(obs.getSubject().getReference()),
+                    AnalyzerResults.PATIENT_HINT_MAX_LENGTH, "patient_hint", ar.getAccessionNumber()));
         }
 
         if (ar.getAccessionNumber() == null) {
@@ -413,10 +465,21 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             return null;
         }
 
+        // accession_number is identity-bearing: truncating it would silently
+        // change sample-matching semantics (wrong-sample attach risk), so an
+        // over-length value rejects the whole bundle instead (LIS-244).
+        if (ar.getAccessionNumber().length() > AnalyzerResults.ACCESSION_NUMBER_MAX_LENGTH) {
+            throw new FieldTooLongException("accession_number", AnalyzerResults.ACCESSION_NUMBER_MAX_LENGTH,
+                    ar.getAccessionNumber().length());
+        }
+
+        // Full wire values feed the LOINC/analyzer-code lookups below; only the
+        // stored provenance copies truncate to their column widths (LIS-244).
         String loincCode = findLoincCode(obs);
         String rawCode = findRawAnalyzerCode(obs);
-        ar.setLoinc(loincCode);
-        ar.setRawCode(rawCode);
+        ar.setLoinc(truncateForStaging(loincCode, AnalyzerResults.LOINC_MAX_LENGTH, "loinc", ar.getAccessionNumber()));
+        ar.setRawCode(
+                truncateForStaging(rawCode, AnalyzerResults.RAW_CODE_MAX_LENGTH, "raw_code", ar.getAccessionNumber()));
 
         // Raw analyzer code remains the legacy analyzer-test-map lookup key. For
         // older non-dual-coded payloads, retain the prior first-coding/text fallback.
@@ -463,7 +526,9 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             } else {
                 ar.setTestName(testCode);
                 ar.setReadOnly(true);
-                ar.setImportIssueReason("unmapped_loinc:" + testCode);
+                ar.setImportIssueReason(
+                        truncateForStaging("unmapped_loinc:" + testCode, AnalyzerResults.IMPORT_ISSUE_REASON_MAX_LENGTH,
+                                "import_issue_reason", ar.getAccessionNumber()));
             }
         }
 
@@ -471,9 +536,11 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         if (obs.hasValueQuantity()) {
             ar.setResult(obs.getValueQuantity().getValue().toPlainString());
             ar.setUnits(obs.getValueQuantity().getUnit());
-            ar.setRawUnit(obs.getValueQuantity().getUnit());
+            ar.setRawUnit(truncateForStaging(obs.getValueQuantity().getUnit(), AnalyzerResults.RAW_UNIT_MAX_LENGTH,
+                    "raw_unit", ar.getAccessionNumber()));
             if (UCUM_SYSTEM.equals(obs.getValueQuantity().getSystem()) && obs.getValueQuantity().hasCode()) {
-                ar.setUcumValue(obs.getValueQuantity().getCode());
+                ar.setUcumValue(truncateForStaging(obs.getValueQuantity().getCode(),
+                        AnalyzerResults.UCUM_VALUE_MAX_LENGTH, "ucum_value", ar.getAccessionNumber()));
             }
             ar.setResultType("N");
         } else if (obs.hasValueStringType()) {
