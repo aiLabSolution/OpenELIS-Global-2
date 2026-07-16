@@ -45,6 +45,11 @@ public class Result extends EnumValueItemImpl {
     private String loinc;
     private String ucumValue;
     private String status;
+    // LIS-97 — analyzer-provided reference range and abnormal flag, preserved
+    // verbatim as analyzer evidence at accept. Distinct from the lab-owned
+    // minNormal/maxNormal below (result_limits, LIS-188/LIS-191).
+    private String referenceRange;
+    private String abnormalFlag;
     private Double minNormal;
     private Double maxNormal;
     private int significantDigits;
@@ -188,6 +193,22 @@ public class Result extends EnumValueItemImpl {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getReferenceRange() {
+        return referenceRange;
+    }
+
+    public void setReferenceRange(String referenceRange) {
+        this.referenceRange = referenceRange;
+    }
+
+    public String getAbnormalFlag() {
+        return abnormalFlag;
+    }
+
+    public void setAbnormalFlag(String abnormalFlag) {
+        this.abnormalFlag = abnormalFlag;
     }
 
     @Override

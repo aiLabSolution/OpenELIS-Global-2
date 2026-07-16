@@ -69,7 +69,8 @@
         read_only="false" duplicate_id="1011" positive="false"
         complete_date="2025-07-01 08:00:00" test_result_type="N"
         test_id="4001" raw_code="K-ORIGINAL" raw_unit="mmol/L" loinc="2823-3"
-        ucum_value="mmol/L" normalization_status="NORMALIZED" />
+        ucum_value="mmol/L" normalization_status="NORMALIZED"
+        reference_range="3.5-5.1" abnormal_flag="N" />
 
     <!-- id=1011: analyzer-sent correction (K+ 7.1), linked back to 1010. Same
         calendar day as 1010, later time — models a genuine analyzer corrected re-export
@@ -81,7 +82,8 @@
         read_only="true" duplicate_id="1010" positive="false"
         complete_date="2025-07-01 14:00:00" test_result_type="N"
         test_id="4001" raw_code="K-CORRECTED" raw_unit="mEq/L" loinc="2823-3"
-        normalization_status="PARTIAL" />
+        normalization_status="PARTIAL" reference_range="3.5-5.1"
+        abnormal_flag="H" />
 
     <!-- id=1012: readOnly missing-mapping row (no testId, no duplicate_id)
         — must never be treated as a linked correction / must never block accept -->

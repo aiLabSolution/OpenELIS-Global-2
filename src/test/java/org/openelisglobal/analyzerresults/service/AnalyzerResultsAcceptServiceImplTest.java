@@ -149,6 +149,33 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
         assertEquals("selected correction LOINC must follow its value", "2823-3", original.getLoinc());
         assertNull("selected correction has no UCUM value", original.getUcumValue());
         assertEquals("selected correction status must follow its value", "PARTIAL", original.getNormalizationStatus());
+        assertEquals("selected correction analyzer range must follow its value (LIS-97)", "3.5-5.1",
+                original.getReferenceRange());
+        assertEquals("selected correction analyzer flag must follow its value (LIS-97)", "H",
+                original.getAbnormalFlag());
+    }
+
+    @Test
+    public void hydrateStagingFlags_overwritesPostedRangeAndFlagFromStaging() {
+        // LIS-97 tamper defense: the analyzer-provided range/flag are persisted
+        // analyzer evidence — a Jackson-bound REST post can carry arbitrary
+        // values for them, and hydrateStagingFlags must overwrite both
+        // unconditionally from the staging row (same rule as the normalization
+        // provenance).
+        AnalyzerResultItem original = originalItem(true, false, false);
+        original.setReferenceRange("0-999");
+        original.setAbnormalFlag("LL");
+        AnalyzerResultItem correction = correctionItem();
+        correction.setReferenceRange(null);
+        correction.setAbnormalFlag(null);
+
+        acceptService.hydrateStagingFlags(List.of(original, correction));
+
+        assertEquals("posted range must be replaced by the staging row's", "3.5-5.1", original.getReferenceRange());
+        assertEquals("posted flag must be replaced by the staging row's", "N", original.getAbnormalFlag());
+        assertEquals("null posted range must be filled from the staging row", "3.5-5.1",
+                correction.getReferenceRange());
+        assertEquals("null posted flag must be filled from the staging row", "H", correction.getAbnormalFlag());
     }
 
     @Test

@@ -559,6 +559,17 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
 
         ar.setNormalizationStatus(normalizationStatus(ar.getLoinc(), ar.getUcumValue()));
 
+        // Analyzer-provided reference range and abnormal flag (ASTM R.6/R.7,
+        // HL7 OBX-7/OBX-8 → bridge FHIR referenceRange/interpretation, LIS-119).
+        // Stored verbatim as analyzer EVIDENCE — never recomputed here and never
+        // fed into the lab-owned result_limits range applied at accept
+        // (LIS-188/LIS-191). Display/audit-only signal, so over-length values
+        // truncate (LIS-244); absent fields stay null (LIS-97).
+        ar.setReferenceRange(truncateForStaging(findReferenceRange(obs), AnalyzerResults.REFERENCE_RANGE_MAX_LENGTH,
+                "reference_range", ar.getAccessionNumber()));
+        ar.setAbnormalFlag(truncateForStaging(findAbnormalFlag(obs), AnalyzerResults.ABNORMAL_FLAG_MAX_LENGTH,
+                "abnormal_flag", ar.getAccessionNumber()));
+
         // QC/control flag from bridge tag. QC (MSH-16=2) rows are staged for the
         // Westgard pipeline and audit trail, but marked read-only so the analyzer-
         // results accept path (AnalyzerResultsAcceptServiceImpl#buildSampleGroupings
@@ -632,6 +643,45 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         return observation.getCode().getCoding().stream()
                 .filter(coding -> coding.getSystem() == null || coding.getSystem().isBlank()).filter(Coding::hasCode)
                 .map(Coding::getCode).filter(code -> code != null && !code.isBlank()).findFirst().orElse(null);
+    }
+
+    /**
+     * The analyzer's reference range as sent on the wire. The bridge always carries
+     * the raw wire string in {@code referenceRange.text} (adding low/high
+     * quantities only when it parses numerically), so text is authoritative; the
+     * low/high composition is a fallback for non-bridge senders that omit text.
+     */
+    private String findReferenceRange(Observation observation) {
+        if (observation == null || !observation.hasReferenceRange()) {
+            return null;
+        }
+        Observation.ObservationReferenceRangeComponent range = observation.getReferenceRangeFirstRep();
+        if (range.hasText() && !range.getText().isBlank()) {
+            return range.getText();
+        }
+        if (range.hasLow() && range.hasHigh() && range.getLow().hasValue() && range.getHigh().hasValue()) {
+            return range.getLow().getValue().toPlainString() + "-" + range.getHigh().getValue().toPlainString();
+        }
+        return null;
+    }
+
+    /**
+     * The analyzer's abnormal flag. The bridge codes recognized flags
+     * (N/L/H/LL/HH/A/AA/&lt;/&gt;) as v3 ObservationInterpretation codings and
+     * carries anything else verbatim in {@code interpretation.text} so no wire flag
+     * is ever dropped — mirror that here: first coding code, else text.
+     */
+    private String findAbnormalFlag(Observation observation) {
+        if (observation == null || !observation.hasInterpretation()) {
+            return null;
+        }
+        org.hl7.fhir.r4.model.CodeableConcept interpretation = observation.getInterpretationFirstRep();
+        String code = interpretation.getCoding().stream().filter(Coding::hasCode).map(Coding::getCode)
+                .filter(c -> c != null && !c.isBlank()).findFirst().orElse(null);
+        if (code != null) {
+            return code;
+        }
+        return interpretation.hasText() && !interpretation.getText().isBlank() ? interpretation.getText() : null;
     }
 
     private String normalizationStatus(String loinc, String ucumValue) {

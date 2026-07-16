@@ -1216,6 +1216,7 @@
   "collector.label": "Collector",
   "column.actions": "Actions",
   "column.name.accept": "Accept",
+  "column.name.analyzerRange": "Analyzer Range / Flag",
   "column.name.analyzerResult": "Analyzer Result",
   "column.name.currentResult": "Current Result",
   "column.name.ignore": "Ignore",

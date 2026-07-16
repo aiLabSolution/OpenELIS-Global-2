@@ -62,6 +62,14 @@
         <property name="status" type="java.lang.String">
             <column name="STATUS" length="20" />
         </property>
+        <!-- LIS-97 — analyzer-provided range/flag evidence, distinct from the
+            lab-owned min_normal/max_normal (result_limits) below. -->
+        <property name="referenceRange" type="java.lang.String">
+            <column name="REFERENCE_RANGE" length="80" />
+        </property>
+        <property name="abnormalFlag" type="java.lang.String">
+            <column name="ABNORMAL_FLAG" length="40" />
+        </property>
         <property name="minNormal" type="java.lang.Double"
             column="min_normal" />
         <property name="maxNormal" type="java.lang.Double"

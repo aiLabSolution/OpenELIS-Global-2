@@ -37,6 +37,15 @@ public class AnalyzerResultItem implements Serializable {
     private String ucumValue;
     private String normalizationStatus;
 
+    // Analyzer-provided reference range and abnormal flag, preserved verbatim
+    // as analyzer evidence (LIS-97). Display-only on GET; at accept,
+    // AnalyzerResultsAcceptServiceImpl.hydrateStagingFlags overwrites both
+    // UNCONDITIONALLY from the staging row — same tamper defense as the
+    // normalization provenance above (the Jackson-bound REST path ignores
+    // setAllowedFields, so posted values CAN land here and are never trusted).
+    private String referenceRange;
+    private String abnormalFlag;
+
     // TODO move all accession number to the same format so they can be validated
     // properly
     // @ValidAccessionNumber(groups = { AnalyzerResultsForm.AnalyzerResuts.class })
@@ -224,6 +233,22 @@ public class AnalyzerResultItem implements Serializable {
 
     public void setNormalizationStatus(String normalizationStatus) {
         this.normalizationStatus = normalizationStatus;
+    }
+
+    public String getReferenceRange() {
+        return referenceRange;
+    }
+
+    public void setReferenceRange(String referenceRange) {
+        this.referenceRange = referenceRange;
+    }
+
+    public String getAbnormalFlag() {
+        return abnormalFlag;
+    }
+
+    public void setAbnormalFlag(String abnormalFlag) {
+        this.abnormalFlag = abnormalFlag;
     }
 
     public void setAccessionNumber(String accessionNumber) {

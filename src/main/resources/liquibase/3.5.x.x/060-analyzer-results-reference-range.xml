@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="lis97-001-add-analyzer-results-reference-range" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists schemaName="clinlims" tableName="analyzer_results" columnName="reference_range"/>
+            </not>
+        </preConditions>
+        <comment>Analyzer-provided reference range and abnormal flag (ASTM R.6/R.7, HL7 OBX-7/OBX-8 via bridge FHIR Observation.referenceRange/.interpretation) carried into analyzer staging as preserved analyzer evidence (LIS-97). Null = source carried none. Distinct from the lab-owned result_limits range applied at accept (LIS-188/LIS-191), which these columns never feed.</comment>
+
+        <addColumn schemaName="clinlims" tableName="analyzer_results">
+            <column name="reference_range" type="VARCHAR(80)"/>
+            <column name="abnormal_flag" type="VARCHAR(40)"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="reference_range"/>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="abnormal_flag"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis97-002-add-result-reference-range" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists schemaName="clinlims" tableName="result" columnName="reference_range"/>
+            </not>
+        </preConditions>
+        <comment>Carry the analyzer-provided reference range and abnormal flag onto the clinical result at technician acceptance, beside the LIS-7 raw/normalized provenance columns (LIS-97). Write-once analyzer evidence set at accept — deliberately NOT added to the result_version snapshot columns or the append_result_version trigger (047): the staging row remains the raw audit source, and these never change after accept.</comment>
+
+        <addColumn schemaName="clinlims" tableName="result">
+            <column name="reference_range" type="VARCHAR(80)"/>
+            <column name="abnormal_flag" type="VARCHAR(40)"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="reference_range"/>
+            <dropColumn schemaName="clinlims" tableName="result" columnName="abnormal_flag"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

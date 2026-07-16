@@ -144,6 +144,15 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         assertEquals("2823-3", acceptedResult.getLoinc());
         assertEquals("mmol/L", acceptedResult.getUcumValue());
         assertEquals("NORMALIZED", acceptedResult.getStatus());
+        // LIS-97: the analyzer-provided range/flag reach the clinical Result
+        // from the STAGING ROW (the posted item above never carried them —
+        // hydrateStagingFlags supplies them), and the lab-owned result_limits
+        // range stays what addMinMaxNormal computed (±Infinity here, no
+        // result_limits fixture — LIS-191), never derived from the analyzer's.
+        assertEquals("3.5 to 5.1", acceptedResult.getReferenceRange());
+        assertEquals("N", acceptedResult.getAbnormalFlag());
+        assertEquals(Double.NEGATIVE_INFINITY, acceptedResult.getMinNormal(), 0.0);
+        assertEquals(Double.POSITIVE_INFINITY, acceptedResult.getMaxNormal(), 0.0);
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("accept must append one immutable result version", Integer.valueOf(1),

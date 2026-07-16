@@ -275,6 +275,11 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             item.setLoinc(entity.getLoinc());
             item.setUcumValue(entity.getUcumValue());
             item.setNormalizationStatus(entity.getNormalizationStatus());
+            // Analyzer-provided reference range/abnormal flag are persisted
+            // analyzer evidence (LIS-97) — same unconditional overwrite as the
+            // normalization provenance above.
+            item.setReferenceRange(entity.getReferenceRange());
+            item.setAbnormalFlag(entity.getAbnormalFlag());
             // the staging row's true completeDate, for the LIS-128 cross-day
             // linked-correction guard. This overwrite is UNCONDITIONAL and happens
             // before any read — that is the guard's tamper defense: the REST accept
@@ -1064,6 +1069,8 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         target.setLoinc(source.getLoinc());
         target.setUcumValue(source.getUcumValue());
         target.setNormalizationStatus(source.getNormalizationStatus());
+        target.setReferenceRange(source.getReferenceRange());
+        target.setAbnormalFlag(source.getAbnormalFlag());
     }
 
     private void copyNormalizationProvenance(Result target, AnalyzerResultItem source) {
@@ -1072,6 +1079,11 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
         target.setLoinc(source.getLoinc());
         target.setUcumValue(source.getUcumValue());
         target.setStatus(source.getNormalizationStatus());
+        // Analyzer-provided range/flag are preserved verbatim as analyzer
+        // evidence (LIS-97) — distinct from the lab-owned result_limits range
+        // written by addMinMaxNormal (LIS-188/LIS-191), which stays untouched.
+        target.setReferenceRange(source.getReferenceRange());
+        target.setAbnormalFlag(source.getAbnormalFlag());
     }
 
     private Result createNewResult(AnalyzerResultItem resultItem, Patient patient, String sysUserId) {
