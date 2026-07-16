@@ -408,6 +408,62 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
                 countUpdateAuditEvents());
     }
 
+    /**
+     * Paging-merge integrity (LIS-56): the cache accepts the client's decisions
+     * only when the posted page mirrors the served page exactly. Two result rows of
+     * one multi-result analysis share an analysisId but have distinct resultIds;
+     * posting them SWAPPED must be rejected wholesale — otherwise a client value
+     * would merge onto a different server-owned resultId (result corruption) and an
+     * accept could ride a swapped row. Exercises the real
+     * {@link ResultValidationPaging} (no DB — SpringContext supplies the page
+     * size).
+     */
+    @Test
+    public void pagingMerge_rejectsRowSwapSharingAnalysisId_noCorruption() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setSession(new MockHttpSession());
+
+        AnalysisItem rowOne = pagedRow("ACC-DUP", ANALYSIS_ID, "9001", "10");
+        AnalysisItem rowTwo = pagedRow("ACC-DUP", ANALYSIS_ID, "9002", "20");
+
+        ResultValidationForm form = new ResultValidationForm();
+        ResultValidationPaging paging = new ResultValidationPaging();
+        paging.setDatabaseResults(request, form, new ArrayList<>(List.of(rowOne, rowTwo)));
+
+        // client posts the same page with the two rows SWAPPED, each carrying a
+        // tampered value and an accept — order no longer matches the cache
+        AnalysisItem swappedTwo = pagedRow("ACC-DUP", ANALYSIS_ID, "9002", "999");
+        swappedTwo.setIsAccepted(true);
+        AnalysisItem swappedOne = pagedRow("ACC-DUP", ANALYSIS_ID, "9001", "888");
+        swappedOne.setIsAccepted(true);
+        form.setResultList(new ArrayList<>(List.of(swappedTwo, swappedOne)));
+
+        paging.updatePagedResults(request, form);
+
+        List<AnalysisItem> merged = paging.getResults(request);
+        assertEquals(2, merged.size());
+        // the whole update was rejected: server values and (non-)accept untouched
+        assertEquals("row 9001 value must be untouched", "10", valueOfResult(merged, "9001"));
+        assertEquals("row 9002 value must be untouched", "20", valueOfResult(merged, "9002"));
+        assertTrue("no row may be flipped to accepted by a swapped post",
+                merged.stream().noneMatch(AnalysisItem::getIsAccepted));
+    }
+
+    private AnalysisItem pagedRow(String accession, String analysisId, String resultId, String value) {
+        AnalysisItem item = new AnalysisItem();
+        item.setAccessionNumber(accession);
+        item.setAnalysisId(analysisId);
+        item.setResultId(resultId);
+        item.setResultType("N");
+        item.setResult(value);
+        return item;
+    }
+
+    private static String valueOfResult(List<AnalysisItem> items, String resultId) {
+        return items.stream().filter(i -> resultId.equals(i.getResultId())).map(AnalysisItem::getResult).findFirst()
+                .orElse(null);
+    }
+
     /** Count of update ('U') history rows for the held analysis under test. */
     private long countUpdateAuditEvents() {
         return historyService.getHistoryByRefIdAndRefTableId(ANALYSIS_ID, analysisRefTableId).stream()

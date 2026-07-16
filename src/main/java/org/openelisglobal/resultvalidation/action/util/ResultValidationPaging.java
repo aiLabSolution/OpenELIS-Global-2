@@ -113,29 +113,46 @@ public class ResultValidationPaging {
         }
 
         /**
-         * LIS-56: merge only the client's DECISION fields onto the server-cached items.
+         * LIS-56: merge only the client's DECISION fields onto the server-cached items,
+         * and only after the client page is verified to mirror the served page exactly.
          * The cache previously took the client objects wholesale, which made every
-         * field — including analysisId, readOnly and the identity fields the downstream
-         * save trusts — client-controlled at save time: a tampered analysisId could
-         * release an analysis outside the queue page the user was shown. The merge
-         * stays positional (the client posts the page exactly as served — one item per
-         * result row, so several rows can share an analysisId and an id-keyed merge
-         * would collapse them), but identity now stays server-owned: a row whose client
-         * analysisId does not match the cached row is ignored rather than trusted.
+         * field — including the identity fields the downstream save trusts —
+         * client-controlled at save time.
+         *
+         * <p>
+         * The client is expected to post the page back exactly as it was served: same
+         * row count, and each row's server-issued identity (analysisId AND resultId —
+         * several rows can share an analysisId for a multi-result analysis, so resultId
+         * is what makes a row unique) unchanged and in the same order. The whole update
+         * is REJECTED (nothing merged) on any mismatch — a wrong count, a swapped pair,
+         * or a tampered id — because a row that has been reordered or substituted would
+         * otherwise merge a client value onto a different server-owned result (release
+         * of an unintended analysis, or a result value landing on the wrong resultId).
+         * Only when every row's identity checks out are the client's decision fields
+         * copied onto the matching cached row; identity itself is never taken from the
+         * client.
          */
         @Override
         public void updateCache(List<AnalysisItem> cacheItems, List<AnalysisItem> clientItems) {
-            for (int i = 0; i < cacheItems.size() && i < clientItems.size(); i++) {
+            if (clientItems.size() != cacheItems.size()) {
+                LogEvent.logWarn("ResultValidationPaging", "updateCache",
+                        "client posted " + clientItems.size() + " rows but the cached page has " + cacheItems.size()
+                                + " — rejecting the entire page update (identity/cardinality mismatch)");
+                return;
+            }
+            for (int i = 0; i < cacheItems.size(); i++) {
+                if (!identityMatches(cacheItems.get(i), clientItems.get(i))) {
+                    LogEvent.logWarn("ResultValidationPaging", "updateCache",
+                            "client row " + i + " identity does not match the cached page row (analysisId/resultId "
+                                    + clientItems.get(i).getAnalysisId() + "/" + clientItems.get(i).getResultId()
+                                    + " vs cached " + cacheItems.get(i).getAnalysisId() + "/"
+                                    + cacheItems.get(i).getResultId() + ") — rejecting the entire page update");
+                    return;
+                }
+            }
+            for (int i = 0; i < cacheItems.size(); i++) {
                 AnalysisItem cacheItem = cacheItems.get(i);
                 AnalysisItem clientItem = clientItems.get(i);
-                if (cacheItem.getAnalysisId() == null
-                        || !cacheItem.getAnalysisId().equals(clientItem.getAnalysisId())) {
-                    LogEvent.logWarn("ResultValidationPaging", "updateCache",
-                            "client row " + i + " does not match the cached page row (analysisId "
-                                    + clientItem.getAnalysisId() + " vs cached " + cacheItem.getAnalysisId()
-                                    + ") — client edits for that row ignored");
-                    continue;
-                }
                 cacheItem.setIsAccepted(clientItem.getIsAccepted());
                 cacheItem.setIsRejected(clientItem.getIsRejected());
                 cacheItem.setNote(clientItem.getNote());
@@ -145,6 +162,12 @@ public class ResultValidationPaging {
                 cacheItem.setSampleIsAccepted(clientItem.isSampleIsAccepted());
                 cacheItem.setSampleIsRejected(clientItem.isSampleIsRejected());
             }
+        }
+
+        /** A cached row and a client row refer to the same server-issued result. */
+        private static boolean identityMatches(AnalysisItem cacheItem, AnalysisItem clientItem) {
+            return cacheItem.getAnalysisId() != null && cacheItem.getAnalysisId().equals(clientItem.getAnalysisId())
+                    && java.util.Objects.equals(cacheItem.getResultId(), clientItem.getResultId());
         }
 
         @Override
