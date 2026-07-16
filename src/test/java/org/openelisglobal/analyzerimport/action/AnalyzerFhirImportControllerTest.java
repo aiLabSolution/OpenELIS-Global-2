@@ -554,4 +554,137 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
 
         verify(analyzerService, never()).insert(any(Analyzer.class));
     }
+
+    @Test
+    public void importFhirBundle_OverlongAccession_RejectsBundleNamingField() throws Exception {
+        // LIS-244: accession_number is identity-bearing — truncating it would
+        // change sample-matching semantics (wrong-sample attach risk), so an
+        // over-length value rejects the whole bundle with 400. The bridge treats
+        // 4xx as non-retryable and dead-letters the bundle instead of re-POSTing
+        // it forever (the retry-poison this slice closes).
+        String overlong = "A".repeat(AnalyzerResults.ACCESSION_NUMBER_MAX_LENGTH + 1);
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"" + overlong + "\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorKey").value("analyzer.fhirImport.error.fieldTooLong"))
+                .andExpect(jsonPath("$.errorArgs.field").value("accession_number"))
+                .andExpect(jsonPath("$.errorArgs.maxLength")
+                        .value(String.valueOf(AnalyzerResults.ACCESSION_NUMBER_MAX_LENGTH)));
+
+        verify(analyzerResultsService, never()).insertAnalyzerResults(anyList(), eq("1"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_MaxLengthAccession_IsAccepted() throws Exception {
+        // Boundary: exactly 25 chars must pass — liquibase 031 widened the DB
+        // column to VARCHAR(25) for 10-char SITEYEARNUM prefixes, so enforcing
+        // the stale 20 would reject legitimate accessions.
+        String maxLength = "B".repeat(AnalyzerResults.ACCESSION_NUMBER_MAX_LENGTH);
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"" + maxLength + "\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        org.junit.Assert.assertEquals(maxLength, ((AnalyzerResults) captor.getValue().get(0)).getAccessionNumber());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_OverlongPatientHint_TruncatedToColumnWidth() throws Exception {
+        // LIS-244: patient_hint is a comparison-only signal — both the original
+        // and any re-export pass through this same boundary, so identical
+        // truncation preserves the conflict check while curing the insert
+        // failure (bundle retry poison).
+        String overlongHint = "H".repeat(AnalyzerResults.PATIENT_HINT_MAX_LENGTH + 20);
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:patient-1\",\"resource\":{" + "\"resourceType\":\"Patient\","
+                + "\"identifier\":[{\"system\":\"http://openelis-global.org/fhir/analyzer-patient-id\","
+                + "\"value\":\"" + overlongHint + "\"}]}}," + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"ACC-244\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"subject\":{\"reference\":\"urn:uuid:patient-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        org.junit.Assert.assertEquals(overlongHint.substring(0, AnalyzerResults.PATIENT_HINT_MAX_LENGTH),
+                ((AnalyzerResults) captor.getValue().get(0)).getPatientHint());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_WhitespacePaddedPatientHint_StoredTrimmed() throws Exception {
+        // LIS-244 trim hygiene: whitespace variance between an original and a
+        // re-export must not create a stored difference — trim at the boundary
+        // so the persisted hint is canonical.
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:patient-1\",\"resource\":{" + "\"resourceType\":\"Patient\","
+                + "\"identifier\":[{\"system\":\"http://openelis-global.org/fhir/analyzer-patient-id\","
+                + "\"value\":\"  PID2-0007  \"}]}}," + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"ACC-245\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"subject\":{\"reference\":\"urn:uuid:patient-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        org.junit.Assert.assertEquals("PID2-0007", ((AnalyzerResults) captor.getValue().get(0)).getPatientHint());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_OverlongSignalFields_TruncatedAndStillStage() throws Exception {
+        // LIS-244: raw_code / loinc / raw_unit / ucum_value are provenance and
+        // mapping signals, not identity — truncate to column width so the row
+        // still stages (read-only when unmapped) instead of poisoning the whole
+        // bundle. The derived import_issue_reason ("unmapped_loinc:" + code)
+        // must also fit its VARCHAR(200).
+        String overlongCode = "C".repeat(300);
+        String overlongLoinc = "1".repeat(AnalyzerResults.LOINC_MAX_LENGTH + 10);
+        String overlongUnit = "u".repeat(AnalyzerResults.RAW_UNIT_MAX_LENGTH + 10);
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"ACC-246\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"}," + "\"code\":{\"coding\":["
+                + "{\"system\":\"http://loinc.org\",\"code\":\"" + overlongLoinc + "\"}," + "{\"code\":\""
+                + overlongCode + "\"}]}," + "\"valueQuantity\":{\"value\":7.5,\"unit\":\"" + overlongUnit + "\","
+                + "\"system\":\"http://unitsofmeasure.org\",\"code\":\"" + overlongUnit + "\"}}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertEquals(AnalyzerResults.RAW_CODE_MAX_LENGTH, staged.getRawCode().length());
+        org.junit.Assert.assertEquals(AnalyzerResults.LOINC_MAX_LENGTH, staged.getLoinc().length());
+        org.junit.Assert.assertEquals(AnalyzerResults.RAW_UNIT_MAX_LENGTH, staged.getRawUnit().length());
+        org.junit.Assert.assertEquals(AnalyzerResults.UCUM_VALUE_MAX_LENGTH, staged.getUcumValue().length());
+        org.junit.Assert.assertTrue("unmapped row must stage read-only", staged.isReadOnly());
+        org.junit.Assert.assertTrue("derived import_issue_reason must fit its column",
+                staged.getImportIssueReason().length() <= AnalyzerResults.IMPORT_ISSUE_REASON_MAX_LENGTH);
+    }
 }
