@@ -33,9 +33,9 @@ import org.springframework.beans.factory.annotation.Autowired;
  *
  * <ol>
  * <li><b>The seeds executed.</b> All {@code lis183-*} (052), {@code lis187-*}
- * (053), {@code lis192-*} (055) and {@code lis111-*} (056) changesets are
+ * (053), {@code lis192-*} (055) and {@code lis111-*} (058) changesets are
  * recorded {@code EXECUTED} in {@code databasechangelog} (liquibase's own
- * tracking table, which fixtures never reset) — proving 052/053/055/056 are
+ * tracking table, which fixtures never reset) — proving 052/053/055/058 are
  * wired into the changelog and apply cleanly in a from-scratch migration.</li>
  * <li><b>The production resolver works over the real DB for the full panel.</b>
  * With a fixture EDAN analyzer + the full H90-series panel of LOINC-carrying
