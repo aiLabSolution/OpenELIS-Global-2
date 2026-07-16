@@ -234,7 +234,6 @@
   "analyzer.errorDetails.subtitle": "معلومات تفصيلية وسجلات جهاز التحليل للخطأ {id}",
   "analyzer.errorDetails.timestamp": "الطابع الزمني",
   "analyzer.errorDetails.title": "تفاصيل الخطأ",
-  "analyzer.fhirImport.error.fieldTooLong": "Field {field} exceeds maximum length {maxLength} characters (got {actualLength})",
   "analyzer.fhirImport.error.importFailed": "FHIR bundle import failed",
   "analyzer.fhirImport.error.invalidBundleType": "Bundle type must be 'transaction' or 'batch', got: {bundleType}",
   "analyzer.fhirImport.error.noObservations": "Bundle contains no Observation resources with results",
