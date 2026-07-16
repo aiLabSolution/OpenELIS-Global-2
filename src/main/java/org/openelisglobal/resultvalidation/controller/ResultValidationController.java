@@ -397,8 +397,7 @@ public class ResultValidationController extends BaseResultValidationController {
                     }
 
                     if (analysisItem.getIsRejected()) {
-                        analysis.setStatusId(SpringContext.getBean(IStatusService.class)
-                                .getStatusID(AnalysisStatus.BiologistRejected));
+                        resultValidationService.markAnalysisRejected(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }

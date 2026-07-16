@@ -40,6 +40,7 @@ import org.openelisglobal.audittrail.dao.AuditTrailService;
 import org.openelisglobal.audittrail.daoimpl.AuditTrailServiceImpl;
 import org.openelisglobal.audittrail.valueholder.History;
 import org.openelisglobal.common.action.IActionConstants;
+import org.openelisglobal.common.exception.LIMSRuntimeException;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.dataexchange.fhir.FhirConfig;
@@ -409,6 +410,48 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
     }
 
     /**
+     * Two-session state-guard (LIS-56): after a pathologist releases an analysis
+     * (Finalized), a stale/concurrent reject from a Validation user holding an
+     * out-of-date page must NOT retract it. The reject path is now guarded
+     * symmetrically to release ({@code markAnalysisRejected} refuses a non-held
+     * analysis), so the whole save aborts and the released analysis is left
+     * untouched — status, release timestamp, result value and audit history all
+     * preserved. Without the guard the stale reject would flip the Finalized
+     * analysis to BiologistRejected while keeping its release timestamp and could
+     * overwrite the finalized result value.
+     */
+    @Test
+    public void staleReject_afterPathologistRelease_isRefusedAndDoesNotRetract() {
+        String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
+        String finalizedId = statusService.getStatusID(AnalysisStatus.Finalized);
+
+        // session A: the pathologist releases the held analysis
+        releaseHeldAnalysisAsPathologist(technicalAcceptanceId);
+        Analysis released = analysisService.get(ANALYSIS_ID);
+        assertEquals(finalizedId, released.getStatusId());
+        java.sql.Timestamp releasedDate = released.getReleasedDate();
+        assertNotNull(releasedDate);
+        long updateEventsBefore = countUpdateAuditEvents();
+        String resultValueBefore = resultService.get(RESULT_ID).getValue();
+
+        // session B: a Validation user posts a stale reject for the now-finalized
+        // analysis — the endpoint admits the role, but the reject transition is
+        // state-guarded and refuses
+        assertThrows(LIMSRuntimeException.class,
+                () -> driveSaveEndpoint(authorities("ROLE_VALIDATION"), false, true, "999.9"));
+
+        Analysis afterStaleReject = analysisService.get(ANALYSIS_ID);
+        assertEquals("a stale reject must not retract the finalized status", finalizedId,
+                afterStaleReject.getStatusId());
+        assertEquals("a stale reject must not clear or change the release timestamp", releasedDate.getTime(),
+                afterStaleReject.getReleasedDate().getTime());
+        assertEquals("a stale reject must not overwrite the finalized result value", resultValueBefore,
+                resultService.get(RESULT_ID).getValue());
+        assertEquals("a stale reject must write no new update AuditEvent", updateEventsBefore,
+                countUpdateAuditEvents());
+    }
+
+    /**
      * Paging-merge integrity (LIS-56): the cache accepts the client's decisions
      * only when the posted page mirrors the served page exactly. Two result rows of
      * one multi-result analysis share an analysisId but have distinct resultIds;
@@ -481,6 +524,19 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
      */
     private void driveSaveEndpointAcceptingHeldAnalysis(List<SimpleGrantedAuthority> grantedAuthorities)
             throws Exception {
+        driveSaveEndpoint(grantedAuthorities, true, false, null);
+    }
+
+    /**
+     * Drive the real REST save handler in-process for the seeded analysis (8265)
+     * with the given authorities and accept/reject decision (and an optional client
+     * result value, to prove a refused transition cannot overwrite the stored
+     * value). Populates the request-bound SecurityContext, the OE user-session
+     * attribution and the paging session cache exactly as production does (via
+     * ResultValidationPaging), then invokes the controller.
+     */
+    private void driveSaveEndpoint(List<SimpleGrantedAuthority> grantedAuthorities, boolean accept, boolean reject,
+            String clientResultValue) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setMethod("POST");
         request.setRequestURI("/rest/AccessionValidation");
@@ -498,10 +554,15 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
 
         AnalysisItem item = new AnalysisItem();
         item.setAnalysisId(ANALYSIS_ID);
+        item.setResultId(RESULT_ID);
         item.setAccessionNumber("LIS56R1");
         item.setReadOnly(false);
-        item.setIsAccepted(true);
+        item.setIsAccepted(accept);
+        item.setIsRejected(reject);
         item.setResultType("N");
+        if (clientResultValue != null) {
+            item.setResult(clientResultValue);
+        }
 
         ResultValidationForm form = new ResultValidationForm();
         ResultValidationPaging paging = new ResultValidationPaging();

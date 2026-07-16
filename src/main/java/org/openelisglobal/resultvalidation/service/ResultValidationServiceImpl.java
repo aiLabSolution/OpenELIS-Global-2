@@ -51,20 +51,11 @@ public class ResultValidationServiceImpl implements ResultValidationService {
     @Override
     public void markAnalysisReleased(Analysis analysis, String sysUserId) {
         // Fail-closed held-state guard (LIS-56): only an analysis actually
-        // sitting in the human validation queue is releasable — Technical
-        // Acceptance always, Technical Rejection only when the queue is
-        // configured to include it. The analysis handed in is loaded from the
-        // database by the caller, so its statusId is server truth; anything
-        // else (already Finalized, NotStarted, a tampered id...) must not be
-        // silently re-finalized.
-        String statusId = analysis.getStatusId();
-        boolean held = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance).equals(statusId)
-                || (ConfigurationProperties.getInstance().isPropertyValueEqual(Property.VALIDATE_REJECTED_TESTS, "true")
-                        && statusService.getStatusID(AnalysisStatus.TechnicalRejected).equals(statusId));
-        if (!held) {
-            throw new LIMSRuntimeException("Refusing to release analysis " + analysis.getId() + ": status " + statusId
-                    + " is not a releasable (held) validation-queue status");
-        }
+        // sitting in the human validation queue is releasable. The analysis
+        // handed in is loaded from the database by the caller, so its statusId
+        // is server truth; anything else (already Finalized, NotStarted, a
+        // tampered/stale id...) must not be silently re-finalized.
+        requireHeld(analysis, "release");
 
         // Same transition the autoverification gate performs system-side
         // (AutoverificationGateServiceImpl#autoFinalize) — the two must stay in
@@ -72,6 +63,35 @@ public class ResultValidationServiceImpl implements ResultValidationService {
         analysis.setSysUserId(sysUserId);
         analysis.setStatusId(statusService.getStatusID(AnalysisStatus.Finalized));
         analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
+    }
+
+    @Override
+    public void markAnalysisRejected(Analysis analysis, String sysUserId) {
+        // Same fail-closed guard as release: a reject may only send a still-held
+        // analysis back to the bench. Without it, a stale/concurrent reject would
+        // flip an already-released (Finalized) analysis to BiologistRejected,
+        // retracting finalized clinical output and leaving a release timestamp on
+        // a rejected row.
+        requireHeld(analysis, "reject");
+
+        analysis.setSysUserId(sysUserId);
+        analysis.setStatusId(statusService.getStatusID(AnalysisStatus.BiologistRejected));
+    }
+
+    /**
+     * A validation-queue status transition (release or reject) is permitted only
+     * while the analysis is still held — Technical Acceptance always, Technical
+     * Rejection only when the queue is configured to include it. Throws otherwise.
+     */
+    private void requireHeld(Analysis analysis, String action) {
+        String statusId = analysis.getStatusId();
+        boolean held = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance).equals(statusId)
+                || (ConfigurationProperties.getInstance().isPropertyValueEqual(Property.VALIDATE_REJECTED_TESTS, "true")
+                        && statusService.getStatusID(AnalysisStatus.TechnicalRejected).equals(statusId));
+        if (!held) {
+            throw new LIMSRuntimeException("Refusing to " + action + " analysis " + analysis.getId() + ": status "
+                    + statusId + " is not a held validation-queue status (it may have already been validated)");
+        }
     }
 
     @Override
