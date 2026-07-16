@@ -119,12 +119,12 @@
         read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
         test_result_type="N" test_id="7810" />
 
-    <!-- AVGT600/601/602: LIS-54 end-to-end delta check. Three consecutive
-        results for the SAME pre-ordered patient (sample chains seeded via SQL
-        like AVGT500). All values sit inside the 40-60 reference range so the
-        delta leg is the only discriminator: 42 finalizes (no prior), 58 is an
-        implausible jump (Δ16 > abs threshold 10) and holds, 44 is within
-        threshold vs the finalized 42 prior (Δ2) and finalizes. -->
+    <!-- AVGT600/601/602: LIS-54 end-to-end delta check. Three consecutive results
+        for the SAME pre-ordered patient (sample chains seeded via SQL like AVGT500).
+        All values sit inside the 40-60 reference range so the delta leg is the only
+        discriminator: 42 finalizes (no prior), 58 is an implausible jump (Δ16 >
+        abs threshold 10) and holds, 44 is within threshold vs the finalized 42 prior
+        (Δ2) and finalizes. -->
     <analyzer_results id="7858" analyzer_id="7801"
         accession_number="AVGT600" test_name="Potassium AVG" result="42"
         units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
