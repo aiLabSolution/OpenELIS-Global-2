@@ -38,6 +38,20 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     private static final long serialVersionUID = 1L;
 
+    // Column widths of the wire-derived staging fields. The FHIR import boundary
+    // (AnalyzerFhirImportController) enforces these before insert — accession
+    // rejects the bundle, signal fields truncate — because an over-length value
+    // otherwise fails the whole bundle insert and the bridge re-POSTs it forever
+    // (LIS-244). accession_number is 25, not the pre-031 20: liquibase 031
+    // widened the DB column for 10-char SITEYEARNUM prefixes.
+    public static final int ACCESSION_NUMBER_MAX_LENGTH = 25;
+    public static final int RAW_CODE_MAX_LENGTH = 80;
+    public static final int RAW_UNIT_MAX_LENGTH = 40;
+    public static final int LOINC_MAX_LENGTH = 80;
+    public static final int UCUM_VALUE_MAX_LENGTH = 40;
+    public static final int PATIENT_HINT_MAX_LENGTH = 80;
+    public static final int IMPORT_ISSUE_REASON_MAX_LENGTH = 200;
+
     @Id
     @Column(name = "ID", precision = 10, scale = 0)
     @GeneratedValue(generator = "analyzer_results_seq_gen")
@@ -49,7 +63,7 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     @Convert(converter = StringToIntegerConverter.class)
     private String analyzerId;
 
-    @Column(name = "ACCESSION_NUMBER", length = 20)
+    @Column(name = "ACCESSION_NUMBER", length = ACCESSION_NUMBER_MAX_LENGTH)
     private String accessionNumber;
 
     @Column(name = "test_name")
@@ -61,16 +75,16 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     @Column(name = "UNITS")
     private String units;
 
-    @Column(name = "raw_code", length = 80)
+    @Column(name = "raw_code", length = RAW_CODE_MAX_LENGTH)
     private String rawCode;
 
-    @Column(name = "raw_unit", length = 40)
+    @Column(name = "raw_unit", length = RAW_UNIT_MAX_LENGTH)
     private String rawUnit;
 
-    @Column(name = "loinc", length = 80)
+    @Column(name = "loinc", length = LOINC_MAX_LENGTH)
     private String loinc;
 
-    @Column(name = "ucum_value", length = 40)
+    @Column(name = "ucum_value", length = UCUM_VALUE_MAX_LENGTH)
     private String ucumValue;
 
     @Column(name = "normalization_status", length = 20)
@@ -79,7 +93,7 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     // Wire patient identity forwarded by the analyzer bridge (FHIR Patient
     // identifier, e.g. HL7 PID-2). Null when the source carried none — a null
     // carries no signal and never blocks anything (LIS-239).
-    @Column(name = "patient_hint", length = 80)
+    @Column(name = "patient_hint", length = PATIENT_HINT_MAX_LENGTH)
     private String patientHint;
 
     @Column(name = "DUPLICATE_ID", length = 10)
@@ -102,7 +116,7 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     @Column(name = "complete_date")
     private Timestamp completeDate;
 
-    @Column(name = "import_issue_reason", length = 200)
+    @Column(name = "import_issue_reason", length = IMPORT_ISSUE_REASON_MAX_LENGTH)
     private String importIssueReason;
 
     // QC metadata propagated from the analyzer-bridge for control samples.
