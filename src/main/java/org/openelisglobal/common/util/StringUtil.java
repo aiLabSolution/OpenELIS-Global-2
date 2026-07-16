@@ -676,16 +676,60 @@ public class StringUtil {
     }
 
     public static String getActualNumericValue(String resultValue) {
-        // ignore < or > from the analyser on validation
-        String actualValue = resultValue;
-        if (actualValue.startsWith("<") || actualValue.startsWith(">")) {
-            actualValue = actualValue.replaceAll("<|>", "");
-        }
+        // Ignore a leading off-scale comparator (<, <=, >=, >, and the Unicode ≤/≥
+        // forms) from the analyzer/qualified result when extracting the numeric
+        // magnitude for validation, range checks, and FHIR export. Stripping only
+        // "<"/">" left "<=0.01" as "=0.01" → "NaN" → a BigDecimal crash downstream
+        // (LIS-252).
+        String actualValue = stripLeadingComparator(resultValue);
         if (isNumeric(actualValue)) {
             return actualValue;
         } else {
             return "NaN";
         }
+    }
+
+    /**
+     * The leading off-scale comparator on a qualified result value, normalized to
+     * its ASCII FHIR form ({@code <}, {@code <=}, {@code >=}, {@code >}), or
+     * {@code null} when the value carries none. Unicode ≤ (U+2264) / ≥ (U+2265)
+     * normalize to {@code <=} / {@code >=}. Longest match first so {@code "<="} is
+     * never read as {@code "<"} (LIS-252).
+     */
+    public static String getLeadingComparator(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.startsWith("<=") || value.startsWith("≤")) {
+            return "<=";
+        }
+        if (value.startsWith(">=") || value.startsWith("≥")) {
+            return ">=";
+        }
+        if (value.startsWith("<")) {
+            return "<";
+        }
+        if (value.startsWith(">")) {
+            return ">";
+        }
+        return null;
+    }
+
+    /**
+     * Return {@code value} with any leading off-scale comparator removed (see
+     * {@link #getLeadingComparator}); returns it unchanged when there is none.
+     */
+    public static String stripLeadingComparator(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.startsWith("<=") || value.startsWith(">=")) {
+            return value.substring(2);
+        }
+        if (value.startsWith("<") || value.startsWith(">") || value.startsWith("≤") || value.startsWith("≥")) {
+            return value.substring(1);
+        }
+        return value;
     }
 
     public static String repeat(String s, int times) {
