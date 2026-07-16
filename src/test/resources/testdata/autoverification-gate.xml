@@ -28,6 +28,17 @@
         local_code="KAVG" sort_order="2147483640" name="Potassium AVG"
         orderable="true" guid="avg-7810-guid" name_localization_id="7811" />
 
+    <!-- second test, never sent by the analyzer — seeds an OPEN sibling analysis
+        on the ordered sample so the completion roll-up has something to refuse (LIS-226) -->
+    <test id="7812" description="Sodium AVG" loinc="2951-2"
+        reporting_description="Sodium AVG" sticker_req_flag="Y" is_active="Y"
+        active_begin="2025-01-01 12:00:00" active_end="2027-12-31 12:00:00"
+        is_reportable="Y" time_holding="30" time_wait="15"
+        time_ta_average="60" time_ta_warning="90" time_ta_max="120"
+        label_qty="1" lastupdated="2026-07-15 08:00:00" local_code="NAAVG"
+        sort_order="2147483641" name="Sodium AVG" orderable="true"
+        guid="avg-7812-guid" name_localization_id="7811" />
+
     <!-- accept path derives the sample type from sampletype_test for the accepted
         test (getTypeOfSampleId -> sampleTests.get(0)) -->
     <type_of_sample id="7815" description="Serum AVG"

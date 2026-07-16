@@ -5,8 +5,11 @@ import jakarta.persistence.PersistenceContext;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 import org.apache.commons.validator.GenericValidator;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
@@ -14,18 +17,37 @@ import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
 import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
+import org.openelisglobal.common.services.StatusService.OrderStatus;
+import org.openelisglobal.common.services.registration.ValidationUpdateRegister;
+import org.openelisglobal.common.services.registration.interfaces.IResultUpdate;
+import org.openelisglobal.dataexchange.fhir.exception.FhirLocalPersistingException;
+import org.openelisglobal.dataexchange.fhir.service.FhirTransformService;
+import org.openelisglobal.dataexchange.orderresult.OrderResponseWorker.Event;
 import org.openelisglobal.note.service.NoteService;
 import org.openelisglobal.note.service.NoteServiceImpl.NoteType;
 import org.openelisglobal.note.valueholder.Note;
+import org.openelisglobal.notification.service.TestNotificationService;
+import org.openelisglobal.notification.valueholder.NotificationConfigOption.NotificationNature;
+import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.qc.dao.QCResultDAO;
 import org.openelisglobal.qc.service.QCRuleViolationService;
 import org.openelisglobal.qc.valueholder.QCResult;
 import org.openelisglobal.qc.valueholder.QCRuleViolation;
+import org.openelisglobal.referencetables.service.ReferenceTablesService;
+import org.openelisglobal.reports.service.DocumentTrackService;
+import org.openelisglobal.reports.service.DocumentTypeService;
+import org.openelisglobal.result.action.util.ResultSet;
 import org.openelisglobal.result.valueholder.Result;
+import org.openelisglobal.resultvalidation.util.ResultValidationSaveService;
+import org.openelisglobal.sample.service.SampleService;
+import org.openelisglobal.sample.valueholder.Sample;
+import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Default {@link AutoverificationGateService}.
@@ -63,11 +85,38 @@ import org.springframework.transaction.annotation.Transactional;
  * {@link AnalysisService#update} (which writes the audit trail), plus an
  * internal "Auto-verified by system" Note recording the actual per-leg outcomes
  * — the recorded verified-by-system artifact (core has no verified_by column).
- * The human path's release <b>side effects</b> (notifications,
- * sample-completion roll-up, IResultUpdate updaters, FHIR export) are NOT yet
- * replicated — LIS-226 tracks them and gates enabling
- * {@code autoverification.enabled} in any deployment. Hold ⇒ the analysis stays
- * at TechnicalAcceptance and an internal Note records every failed leg.
+ * The human path's release <b>side effects</b> are replicated after the batch
+ * decision (LIS-226), in the same order as
+ * {@code ResultValidationServiceImpl.persistdata} +
+ * {@code AccessionValidationRestController}:
+ * <ol>
+ * <li>RESULT_VALIDATION notification per released result (per-result try/catch
+ * — a notification failure never blocks a release, exactly as upstream);</li>
+ * <li>sample-completion roll-up — the parent sample rolls to
+ * {@code OrderStatus.Finished} when every analysis on it is terminal (Finalized
+ * / Canceled / NonConforming), detached before mutation for the audit
+ * diff;</li>
+ * <li>registered {@link IResultUpdate} updaters get {@code transactionalUpdate}
+ * with the same ResultSet shape the controller builds (DocumentTrack-classified
+ * new-vs-corrected, resultEvent stamped). {@code postTransactionalCommitUpdate}
+ * is intentionally <b>not</b> invoked — the human path's call is disabled
+ * (commented out) upstream, and parity, not improvement, is the contract
+ * here;</li>
+ * <li>FHIR export ({@code transformPersistResultValidationFhirObjects}) —
+ * deferred to <b>afterCommit</b>: the transform is {@code @Async} and re-loads
+ * every entity by id in its own read-only transaction, so dispatching it before
+ * this transaction commits would race the commit (the human path gets this
+ * ordering for free by calling it after persistdata returns). An export failure
+ * is logged but does not un-release — same residual as the human path.</li>
+ * </ol>
+ * An updater or roll-up failure rolls the whole gate transaction back (releases
+ * stay atomic with their transactional side effects; the analyses simply stay
+ * at TechnicalAcceptance for human validation). The notification dispatch is
+ * the one non-transactional exception: the sender is {@code @Async}, so a
+ * notification already in flight when a later leg rolls the release back may
+ * still deliver — the human path has the identical window (persistdata notifies
+ * before its sample and updater legs). Hold ⇒ the analysis stays at
+ * TechnicalAcceptance and an internal Note records every failed leg.
  *
  * <p>
  * The SampleGrouping analyses are detached copies whose {@code @Version} is
@@ -103,6 +152,34 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     @Autowired
     private IStatusService statusService;
 
+    @Autowired
+    private SampleService sampleService;
+
+    @Autowired
+    private SampleHumanService sampleHumanService;
+
+    @Autowired
+    private TestNotificationService testNotificationService;
+
+    @Autowired
+    private FhirTransformService fhirTransformService;
+
+    @Autowired
+    private DocumentTrackService documentTrackService;
+
+    @Autowired
+    private ReferenceTablesService referenceTablesService;
+
+    @Autowired
+    private DocumentTypeService documentTypeService;
+
+    /**
+     * Seam over the static {@link ValidationUpdateRegister} (which reads
+     * ConfigurationProperties), so tests can substitute updaters without touching
+     * global state.
+     */
+    private Supplier<List<IResultUpdate>> updatersSupplier = ValidationUpdateRegister::getRegisteredUpdaters;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -121,6 +198,11 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
 
         String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
 
+        List<Analysis> finalizedAnalyses = new ArrayList<>();
+        ArrayList<Result> finalizedResults = new ArrayList<>();
+        Set<String> finalizedResultIds = new LinkedHashSet<>();
+        Map<String, String> sampleIdByAnalysisId = new LinkedHashMap<>();
+
         for (Map.Entry<String, List<Result>> entry : pairByAnalysisId(sampleGroupings).entrySet()) {
             Analysis analysis;
             try {
@@ -133,6 +215,10 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
                         + entry.getKey() + " — leaving it for human validation: " + e.getMessage());
                 continue;
             }
+            // Navigate to the parent sample while the analysis is still
+            // managed (lazy proxies die at detach) — the completion roll-up
+            // and the updater ResultSets need it.
+            String sampleId = parentSampleId(analysis);
             // Detach from the Hibernate session BEFORE mutating so
             // AuditableBaseObjectServiceImpl.update() loads a clean "old" copy
             // for the audit-trail diff — a managed instance would be compared
@@ -146,10 +232,56 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
             GateEvaluation evaluation = evaluate(analysis, entry.getValue());
             if (evaluation.holdReasons.isEmpty()) {
                 autoFinalize(analysis, evaluation, sysUserId);
+                finalizedAnalyses.add(analysis);
+                if (sampleId != null) {
+                    sampleIdByAnalysisId.put(analysis.getId(), sampleId);
+                }
+                for (Result result : entry.getValue()) {
+                    if (result == null || GenericValidator.isBlankOrNull(result.getId())) {
+                        LogEvent.logError(getClass().getSimpleName(), "evaluateAndFinalize", "Result without id on"
+                                + " released analysis " + analysis.getId() + " — excluded from notification/export");
+                        continue;
+                    }
+                    if (!finalizedResultIds.add(result.getId())) {
+                        // the same persisted row can arrive as several
+                        // detached copies — the FHIR transform dedups by
+                        // composite key but the notification leg would fire
+                        // once per copy
+                        continue;
+                    }
+                    // downstream consumers (notification config lookup, FHIR
+                    // device reference) navigate result.getAnalysis() — hand
+                    // them the reloaded analysis, not the stale grouping copy
+                    result.setAnalysis(analysis);
+                    finalizedResults.add(result);
+                }
             } else {
                 hold(analysis, evaluation.holdReasons, sysUserId);
             }
         }
+
+        if (finalizedAnalyses.isEmpty()) {
+            return;
+        }
+        // Release side effects, in the human validation path's order
+        // (persistdata: notifications -> sample roll-up -> updaters; then the
+        // controller's FHIR export after commit).
+        sendReleaseNotifications(finalizedResults);
+        ArrayList<Sample> finishedSamples = rollUpFinishedSamples(new LinkedHashSet<>(sampleIdByAnalysisId.values()),
+                sysUserId);
+        runRegisteredUpdaters(finalizedResults, sampleIdByAnalysisId);
+        scheduleFhirExport(finalizedAnalyses, finalizedResults, finishedSamples);
+    }
+
+    /** Parent sample id, or null when the linkage cannot be navigated. */
+    private String parentSampleId(Analysis analysis) {
+        if (analysis.getSampleItem() == null || analysis.getSampleItem().getSample() == null
+                || GenericValidator.isBlankOrNull(analysis.getSampleItem().getSample().getId())) {
+            LogEvent.logError(getClass().getSimpleName(), "parentSampleId", "Analysis " + analysis.getId()
+                    + " has no navigable parent sample — completion roll-up skipped for it");
+            return null;
+        }
+        return analysis.getSampleItem().getSample().getId();
     }
 
     /**
@@ -302,5 +434,156 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     private void insertNote(Analysis analysis, String text, String sysUserId) {
         Note note = noteService.createSavableNote(analysis, NoteType.INTERNAL, text, NOTE_SUBJECT, sysUserId);
         noteService.insert(note);
+    }
+
+    // ---------------------------------------------------------------
+    // Release side effects (LIS-226) — parity with the human validation
+    // path (ResultValidationServiceImpl.persistdata +
+    // AccessionValidationRestController)
+    // ---------------------------------------------------------------
+
+    /**
+     * Same call, same guard as persistdata: a notification failure is logged and
+     * never blocks the release (the sender is also {@code @Async} upstream).
+     */
+    private void sendReleaseNotifications(List<Result> finalizedResults) {
+        for (Result result : finalizedResults) {
+            try {
+                testNotificationService
+                        .createAndSendNotificationsToConfiguredSources(NotificationNature.RESULT_VALIDATION, result);
+            } catch (RuntimeException e) {
+                LogEvent.logError(e);
+            }
+        }
+    }
+
+    /**
+     * checkIfSamplesFinished, gate-side: a parent sample whose analyses are all
+     * terminal (Finalized / Canceled / NonConforming) rolls to
+     * {@code OrderStatus.Finished}. The just-finalized analyses are visible to the
+     * query because their merge flushed in this same session.
+     */
+    private ArrayList<Sample> rollUpFinishedSamples(Set<String> sampleIds, String sysUserId) {
+        ArrayList<Sample> finishedSamples = new ArrayList<>();
+        if (sampleIds.isEmpty()) {
+            return finishedSamples;
+        }
+
+        // HashSet, not Set.of: getStatusID answers "-1" for every unmapped
+        // status, and Set.of throws on duplicates
+        Set<String> terminalStatusIds = new LinkedHashSet<>();
+        terminalStatusIds.add(statusService.getStatusID(AnalysisStatus.Finalized));
+        terminalStatusIds.add(statusService.getStatusID(AnalysisStatus.Canceled));
+        terminalStatusIds.add(statusService.getStatusID(AnalysisStatus.NonConforming_depricated));
+        terminalStatusIds.remove("-1");
+        String finishedStatusId = statusService.getStatusID(OrderStatus.Finished);
+        if ("-1".equals(finishedStatusId)) {
+            // unmapped status — writing "-1" would violate the FK and roll the
+            // whole release back; leave the sample open for the human path
+            LogEvent.logError(getClass().getSimpleName(), "rollUpFinishedSamples",
+                    "OrderStatus.Finished is not mapped — sample completion roll-up skipped");
+            return finishedSamples;
+        }
+
+        for (String sampleId : sampleIds) {
+            List<Analysis> sampleAnalyses = analysisService.getAnalysesBySampleId(sampleId);
+            if (sampleAnalyses == null || sampleAnalyses.isEmpty()) {
+                continue;
+            }
+            if (sampleAnalyses.stream().allMatch(analysis -> terminalStatusIds.contains(analysis.getStatusId()))) {
+                Sample sample = sampleService.get(sampleId);
+                // same audit idiom as the analysis: detach so the update diff
+                // records the Started -> Finished transition
+                entityManager.detach(sample);
+                sample.setSysUserId(sysUserId);
+                sample.setStatusId(finishedStatusId);
+                sampleService.update(sample);
+                finishedSamples.add(sample);
+                LogEvent.logInfo(getClass().getSimpleName(), "rollUpFinishedSamples",
+                        "Sample " + sampleId + " rolled to Finished — all analyses terminal after autoverification");
+            }
+        }
+        return finishedSamples;
+    }
+
+    /**
+     * The controller's updater leg: registered {@link IResultUpdate} updaters get
+     * {@code transactionalUpdate} with ResultSets built exactly like
+     * {@code addResultSets} (DocumentTrack decides new-vs-corrected, the
+     * resultEvent is stamped). {@code postTransactionalCommitUpdate} is
+     * intentionally not invoked — its call site in the human path is disabled
+     * (commented out) upstream, and the gate replicates the human path, it does not
+     * extend it. An updater failure rolls the whole gate transaction back by
+     * contract ("If thrown all transactions will be rolled back").
+     */
+    private void runRegisteredUpdaters(List<Result> finalizedResults, Map<String, String> sampleIdByAnalysisId) {
+        List<IResultUpdate> updaters = updatersSupplier.get();
+        if (updaters.isEmpty()) {
+            return;
+        }
+
+        String resultTableId = referenceTablesService.getReferenceTableByName("RESULT").getId();
+        String resultReportId = documentTypeService.getDocumentTypeByName("resultExport").getId();
+
+        ResultValidationSaveService saveService = new ResultValidationSaveService();
+        Map<String, Sample> sampleCache = new LinkedHashMap<>();
+        for (Result result : finalizedResults) {
+            String sampleId = sampleIdByAnalysisId.get(result.getAnalysis().getId());
+            Sample sample = sampleId == null ? null
+                    : sampleCache.computeIfAbsent(sampleId, id -> sampleService.get(id));
+            Patient patient = sample == null ? null : sampleHumanService.getPatientForSample(sample);
+
+            boolean finalResultAlreadySent = !documentTrackService
+                    .getByTypeRecordAndTable(resultReportId, resultTableId, result.getId()).isEmpty();
+            if (finalResultAlreadySent) {
+                result.setResultEvent(Event.CORRECTION);
+                saveService.getModifiedResults().add(new ResultSet(result, null, null, patient, sample, null, false));
+            } else {
+                result.setResultEvent(Event.FINAL_RESULT);
+                saveService.getNewResults().add(new ResultSet(result, null, null, patient, sample, null, false));
+            }
+        }
+
+        for (IResultUpdate updater : updaters) {
+            updater.transactionalUpdate(saveService);
+        }
+    }
+
+    /**
+     * The controller's FHIR export leg, deferred to afterCommit: the transform is
+     * {@code @Async} and re-loads every entity by id in its own read-only
+     * transaction, so it must not be dispatched before this transaction's commit is
+     * visible. Without an active transaction (plain unit-test calls) there is
+     * nothing to wait for and the export runs inline.
+     */
+    private void scheduleFhirExport(List<Analysis> finalizedAnalyses, ArrayList<Result> finalizedResults,
+            ArrayList<Sample> finishedSamples) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    exportFhirObjects(finalizedAnalyses, finalizedResults, finishedSamples);
+                }
+            });
+        } else {
+            exportFhirObjects(finalizedAnalyses, finalizedResults, finishedSamples);
+        }
+    }
+
+    private void exportFhirObjects(List<Analysis> finalizedAnalyses, ArrayList<Result> finalizedResults,
+            ArrayList<Sample> finishedSamples) {
+        try {
+            fhirTransformService.transformPersistResultValidationFhirObjects(new ArrayList<>(), finalizedAnalyses,
+                    finalizedResults, new ArrayList<>(), finishedSamples, new ArrayList<>());
+        } catch (FhirLocalPersistingException | RuntimeException e) {
+            // the analyses are already released — an export failure must be
+            // loud in the log (released-but-undelivered is the exact LIS-226
+            // failure mode), but it cannot un-release them; same residual
+            // behavior as the human path's catch around the same call
+            LogEvent.logError(getClass().getSimpleName(), "exportFhirObjects",
+                    "FHIR export of " + finalizedAnalyses.size() + " auto-verified analysis(es) FAILED — results are"
+                            + " released locally but not exported: " + e.getMessage());
+            LogEvent.logError(e);
+        }
     }
 }
