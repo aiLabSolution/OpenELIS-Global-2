@@ -125,10 +125,9 @@
         </dependency>
         <dependency>
             <!-- FHIR R4 instance validation ($validate) — LIS-41 / S4.1 conformance
-                test and the LIS-42 / S4.2 runtime gate. FhirInstanceValidator +
-                DefaultProfileValidationSupport; the base R4 StructureDefinitions ship
-                in org.hl7.fhir.r4. Runtime scope: inbound ServiceRequests are validated
-                before mapping/persisting (FhirConfig.fhirValidator). -->
+                test and the LIS-42 / S4.2 runtime gate. FhirInstanceValidator + DefaultProfileValidationSupport;
+                the base R4 StructureDefinitions ship in org.hl7.fhir.r4. Runtime scope:
+                inbound ServiceRequests are validated before mapping/persisting (FhirConfig.fhirValidator). -->
             <groupId>ca.uhn.hapi.fhir</groupId>
             <artifactId>hapi-fhir-validation</artifactId>
             <version>8.10.0</version>

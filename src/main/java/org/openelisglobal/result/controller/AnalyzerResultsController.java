@@ -402,6 +402,11 @@ public class AnalyzerResultsController extends BaseController {
         resultItem.setIsControl(result.getIsControl());
         resultItem.setTestName(result.getTestName());
         resultItem.setUnits(getUnits(result.getUnits()));
+        resultItem.setRawCode(result.getRawCode());
+        resultItem.setRawUnit(result.getRawUnit());
+        resultItem.setLoinc(result.getLoinc());
+        resultItem.setUcumValue(result.getUcumValue());
+        resultItem.setNormalizationStatus(result.getNormalizationStatus());
         resultItem.setId(result.getId());
         resultItem.setTestId(result.getTestId());
         resultItem.setCompleteDate(result.getCompleteDateForDisplay());

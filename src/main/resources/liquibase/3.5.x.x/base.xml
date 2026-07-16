@@ -169,4 +169,7 @@
   <!-- LIS-192 (follows LIS-183): EDAN H99S PDW analyte LOINC seed — resolves the 052-deferred PDW to 32207-3 (fL) + maps wire code PDW under the existing EDAN H99S analyzer -->
   <include relativeToChangelogFile="true" file="055-edan-pdw-loinc-seed.xml"/>
 
+  <!-- LIS-133: preserve raw analyzer code/unit beside LOINC/UCUM provenance while results are staged -->
+  <include relativeToChangelogFile="true" file="056-analyzer-results-normalization-provenance.xml"/>
+
 </databaseChangeLog>
