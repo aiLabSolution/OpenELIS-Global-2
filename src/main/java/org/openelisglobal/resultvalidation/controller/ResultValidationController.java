@@ -379,6 +379,10 @@ public class ResultValidationController extends BaseResultValidationController {
             List<Result> resultUpdateList, List<Note> noteUpdateList, List<Result> deletableList,
             IResultSaveService resultValidationSave, boolean areListeners) {
 
+        // LIS-56: fail closed on a contradictory submission (one analysis both
+        // accepted and rejected across its result rows) before any mutation
+        assertConsistentDispositions(analysisItems);
+
         List<String> analysisIdList = new ArrayList<>();
 
         for (AnalysisItem analysisItem : analysisItems) {

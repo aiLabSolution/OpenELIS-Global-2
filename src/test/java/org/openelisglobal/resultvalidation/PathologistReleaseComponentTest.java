@@ -452,6 +452,41 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
     }
 
     /**
+     * Cross-row disposition consistency (LIS-56): a multi-result analysis is served
+     * as several rows sharing an analysisId. A submission that accepts one row and
+     * rejects another row of the SAME analysis is contradictory — the
+     * first-row-wins {@code analysisIdList} logic would otherwise finalize+release
+     * the analysis (accepted row) while still persisting the rejected row's result
+     * value and a rejection note, leaving a released analysis carrying an
+     * explicitly rejected row. The pre-flight {@code assertConsistentDispositions}
+     * fails the whole request closed before any mutation. Driven through the real
+     * endpoint with two resultIds (8266/8267) for one analysis.
+     */
+    @Test
+    public void conflictingAcceptRejectAcrossRowsOfOneAnalysis_isRefusedAndDoesNotMutate() {
+        // second result row on the same held analysis 8265
+        jdbcTemplate.update("INSERT INTO clinlims.result (id, analysis_id, sort_order, result_type, value,"
+                + " is_reportable, significant_digits, lastupdated, fhir_uuid)"
+                + " VALUES (8267, 8265, 2, 'N', '7.7', 'Y', 1, now(), '82670000-0000-0000-0000-000000008267')");
+
+        String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
+        long updateEventsBefore = countUpdateAuditEvents();
+
+        // one page, one analysis, two rows: accept 8266 AND reject 8267 — contradictory
+        assertThrows(LIMSRuntimeException.class,
+                () -> driveSaveEndpoint(authorities("ROLE_PATHOLOGIST", "ROLE_VALIDATION"),
+                        List.of(saveRow(RESULT_ID, true, false, null), saveRow("8267", false, true, "999.9"))));
+
+        Analysis untouched = analysisService.get(ANALYSIS_ID);
+        assertEquals("a contradictory submission must not finalize the analysis", technicalAcceptanceId,
+                untouched.getStatusId());
+        assertNull("a contradictory submission must not stamp a released date", untouched.getReleasedDate());
+        assertEquals("the rejected row's value must not be persisted", "7.7", resultService.get("8267").getValue());
+        assertEquals("a contradictory submission must write no new update AuditEvent", updateEventsBefore,
+                countUpdateAuditEvents());
+    }
+
+    /**
      * Paging-merge integrity (LIS-56): the cache accepts the client's decisions
      * only when the posted page mirrors the served page exactly. Two result rows of
      * one multi-result analysis share an analysisId but have distinct resultIds;
@@ -524,19 +559,38 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
      */
     private void driveSaveEndpointAcceptingHeldAnalysis(List<SimpleGrantedAuthority> grantedAuthorities)
             throws Exception {
-        driveSaveEndpoint(grantedAuthorities, true, false, null);
+        driveSaveEndpoint(grantedAuthorities, List.of(saveRow(RESULT_ID, true, false, null)));
+    }
+
+    private void driveSaveEndpoint(List<SimpleGrantedAuthority> grantedAuthorities, boolean accept, boolean reject,
+            String clientResultValue) throws Exception {
+        driveSaveEndpoint(grantedAuthorities, List.of(saveRow(RESULT_ID, accept, reject, clientResultValue)));
+    }
+
+    /** A save-form row for held analysis 8265 with the given result id/decision. */
+    private AnalysisItem saveRow(String resultId, boolean accept, boolean reject, String clientResultValue) {
+        AnalysisItem item = new AnalysisItem();
+        item.setAnalysisId(ANALYSIS_ID);
+        item.setResultId(resultId);
+        item.setAccessionNumber("LIS56R1");
+        item.setReadOnly(false);
+        item.setIsAccepted(accept);
+        item.setIsRejected(reject);
+        item.setResultType("N");
+        if (clientResultValue != null) {
+            item.setResult(clientResultValue);
+        }
+        return item;
     }
 
     /**
-     * Drive the real REST save handler in-process for the seeded analysis (8265)
-     * with the given authorities and accept/reject decision (and an optional client
-     * result value, to prove a refused transition cannot overwrite the stored
-     * value). Populates the request-bound SecurityContext, the OE user-session
-     * attribution and the paging session cache exactly as production does (via
-     * ResultValidationPaging), then invokes the controller.
+     * Drive the real REST save handler in-process for the given save-form rows with
+     * the given authorities. Populates the request-bound SecurityContext, the OE
+     * user-session attribution and the paging session cache exactly as production
+     * does (via ResultValidationPaging), then invokes the controller.
      */
-    private void driveSaveEndpoint(List<SimpleGrantedAuthority> grantedAuthorities, boolean accept, boolean reject,
-            String clientResultValue) throws Exception {
+    private void driveSaveEndpoint(List<SimpleGrantedAuthority> grantedAuthorities, List<AnalysisItem> items)
+            throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setMethod("POST");
         request.setRequestURI("/rest/AccessionValidation");
@@ -552,23 +606,11 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
                 new UsernamePasswordAuthenticationToken("dr.santos.pathologist", "n/a", grantedAuthorities));
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
 
-        AnalysisItem item = new AnalysisItem();
-        item.setAnalysisId(ANALYSIS_ID);
-        item.setResultId(RESULT_ID);
-        item.setAccessionNumber("LIS56R1");
-        item.setReadOnly(false);
-        item.setIsAccepted(accept);
-        item.setIsRejected(reject);
-        item.setResultType("N");
-        if (clientResultValue != null) {
-            item.setResult(clientResultValue);
-        }
-
         ResultValidationForm form = new ResultValidationForm();
         ResultValidationPaging paging = new ResultValidationPaging();
-        // stores the item in the session paged cache AND sets form.resultList /
+        // stores the rows in the session paged cache AND sets form.resultList /
         // form.paging to page 1 — the same shape the GET populates
-        paging.setDatabaseResults(request, form, new ArrayList<>(List.of(item)));
+        paging.setDatabaseResults(request, form, new ArrayList<>(items));
 
         accessionValidationRestController.showAccessionValidationRangeSave(request, form,
                 new BeanPropertyBindingResult(form, "form"));
