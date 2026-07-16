@@ -1,6 +1,7 @@
 package org.openelisglobal.autoverification.service;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -26,6 +27,7 @@ import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsAcceptServiceImpl;
 import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
+import org.openelisglobal.autoverification.dao.DeltaCheckPriorResultDAO;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
@@ -108,6 +110,9 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     @Autowired
     private IStatusService statusService;
 
+    @Autowired
+    private DeltaCheckPriorResultDAO deltaCheckPriorResultDAO;
+
     /** the AppTestConfig-wide Mockito mock — release notifications land here */
     @Autowired
     private TestNotificationService testNotificationService;
@@ -182,6 +187,7 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
             }
         }
         jdbcTemplate.update("DELETE FROM clinlims.result_limits WHERE id = 7830");
+        jdbcTemplate.update("DELETE FROM clinlims.delta_check_config WHERE id = 'delta-avg-001'");
 
         // the base class runs without a test transaction, so accepted rows and
         // QC evaluation output are real commits — remove them
@@ -240,6 +246,53 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
                 notStartedId);
     }
 
+    /**
+     * Seed three pre-existing ORDERED samples (AVGT600/601/602) for ONE patient —
+     * the LIS-54 delta check compares across a patient's samples, so all three
+     * chains hang off patient 7861. Same raw-SQL idiom as
+     * {@link #seedOrderedSample()}.
+     */
+    private void seedOrderedSamplesForDeltaPatient() {
+        String startedId = statusService.getStatusID(StatusService.OrderStatus.Started);
+        String sampleEnteredId = statusService.getStatusID(StatusService.SampleStatus.Entered);
+        String notStartedId = statusService.getStatusID(AnalysisStatus.NotStarted);
+
+        jdbcTemplate.update("INSERT INTO clinlims.person (id, lastupdated) VALUES (7860, now())");
+        jdbcTemplate.update("INSERT INTO clinlims.patient (id, person_id, lastupdated) VALUES (7861, 7860, now())");
+
+        int sampleId = 7871;
+        int sampleHumanId = 7881;
+        int sampleItemId = 7874;
+        int analysisId = 7877;
+        for (String accession : new String[] { "AVGT600", "AVGT601", "AVGT602" }) {
+            jdbcTemplate.update(
+                    "INSERT INTO clinlims.sample (id, accession_number, domain, status_id, entered_date,"
+                            + " received_date, lastupdated) VALUES (?, ?, 'H', ?::numeric, now(), now(), now())",
+                    sampleId, accession, startedId);
+            jdbcTemplate.update("INSERT INTO clinlims.sample_human (id, samp_id, patient_id, lastupdated)"
+                    + " VALUES (?, ?, 7861, now())", sampleHumanId, sampleId);
+            jdbcTemplate.update(
+                    "INSERT INTO clinlims.sample_item (id, samp_id, sort_order, typeosamp_id, status_id,"
+                            + " lastupdated) VALUES (?, ?, 1, 7815, ?::numeric, now())",
+                    sampleItemId, sampleId, sampleEnteredId);
+            jdbcTemplate.update(
+                    "INSERT INTO clinlims.analysis (id, sampitem_id, test_id, status_id, analysis_type,"
+                            + " revision, lastupdated) VALUES (?, ?, 7810, ?::numeric, 'MANUAL', '1', now())",
+                    analysisId, sampleItemId, notStartedId);
+            sampleId++;
+            sampleHumanId++;
+            sampleItemId++;
+            analysisId++;
+        }
+    }
+
+    /** Per-test delta thresholds for test 7810 (absolute change only). */
+    private void configureDeltaAbsoluteThreshold(String absoluteChange) {
+        jdbcTemplate.update("INSERT INTO clinlims.delta_check_config (id, test_id, absolute_change,"
+                + " relative_change_percent, active, last_updated)"
+                + " VALUES ('delta-avg-001', 7810, ?::numeric, NULL, true, now())", absoluteChange);
+    }
+
     private void ensureStatusRow(String id, String code, String name, String statusType) {
         jdbcTemplate.update(
                 "INSERT INTO clinlims.status_of_sample (id, code, name, description, status_type, lastupdated)"
@@ -286,8 +339,9 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         item.setTestResultType("N");
         item.setAnalyzerId(ANALYZER_ID);
         // LIS-126 fail-closed unmatched gate: accessions without a matching
-        // order (all but AVGT500 here) need the UI's confirmed
-        // accept-as-unknown decision or the whole accept throws
+        // order (all but the seeded AVGT500/6xx here) need the UI's confirmed
+        // accept-as-unknown decision or the whole accept throws; for seeded
+        // accessions the gate never consults this field
         item.setUnmatchedAction("ACCEPT_UNKNOWN");
         // Analysis.setCompletedDateForDisplay parses the configured display
         // format: the test DB seeds default date locale fr-FR, whose
@@ -458,6 +512,70 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         List<String> notes = gateNotes(analysis);
         assertEquals(1, notes.size());
         assertTrue(notes.get(0).contains("Auto-verified by system"));
+    }
+
+    // ---------------------------------------------------------------
+    // LIS-54 — real delta engine, end to end (S5.3 AC2 in CI)
+    // ---------------------------------------------------------------
+
+    @Test
+    public void deltaCheck_endToEnd_flagsImplausibleJump_passesWithinThreshold() throws Exception {
+        // no delta stub anywhere here — this drives the @Primary LIS-54 engine
+        // through the real accept path against the real database
+        seedOrderedSamplesForDeltaPatient();
+        configureDeltaAbsoluteThreshold("10");
+        runQC("102.0", "ACCEPTED");
+
+        // first result: no prior final result yet -> NOT_EVALUABLE -> does not
+        // block; 42 is in range, run is in control -> auto-finalizes and
+        // becomes the patient's prior
+        accept(item("7858", "AVGT600", "42", 1));
+        assertAutoFinalized("AVGT600");
+        assertTrue("first result's note must record the delta leg as not evaluable",
+                gateNotes(findSingleAnalysis("AVGT600")).get(0).contains("delta: not evaluable"));
+
+        // implausible jump: 58 is IN range (40-60) — only the delta leg can
+        // hold it. Δ = |58-42| = 16 > 10.
+        accept(item("7859", "AVGT601", "58", 1));
+        assertHeld("AVGT601", "delta check flagged", "58", "42", "16", "absolute threshold 10");
+
+        // a finalized analysis may carry qualifier/child rows with HIGHER
+        // result ids — the prior must be the numeric row, not the newest row
+        // (review P2): plant an alpha row on the finalized AVGT600 analysis
+        // allocate from result_seq (not max(id)+1) so the accept path's own
+        // sequence-generated insert cannot collide with the planted row
+        Integer qualifierRowId = jdbcTemplate.queryForObject("SELECT nextval('clinlims.result_seq')", Integer.class);
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.result (id, analysis_id, sort_order, result_type, value, lastupdated)"
+                        + " VALUES (?, ?, 2, 'A', 'reviewed - see chart', now())",
+                qualifierRowId, Integer.valueOf(findSingleAnalysis("AVGT600").getId()));
+
+        // within-threshold change vs the finalized 42 prior (the HELD 58 is
+        // not final and must not be the comparison point; the alpha qualifier
+        // row must not be either — an unparseable prior would silently turn
+        // the leg NOT_EVALUABLE and this assertion would still pass, so also
+        // check the pass note claims a real comparison): Δ = 2 -> passes
+        accept(item("7869", "AVGT602", "44", 1));
+        assertAutoFinalized("AVGT602");
+        assertTrue("within-threshold result's note must record the delta pass",
+                gateNotes(findSingleAnalysis("AVGT602")).get(0).contains("delta: within threshold"));
+    }
+
+    @Test
+    public void unknownPlaceholderGuard_anchorsToPatientUtilPlaceholder() {
+        // The DAO detects the placeholder by the 'UNKNOWN_' person last name —
+        // a literal duplicated from PatientUtil.initializeUnknowns() because
+        // upstream exposes no constant. Anchor the guard to the REAL
+        // placeholder PatientUtil maintains so a silent upstream rename breaks
+        // this test instead of silently reviving cross-patient delta
+        // comparisons (port-every-assertion rule).
+        String unknownPatientId = org.openelisglobal.patient.util.PatientUtil.getUnknownPatient().getId();
+        assertTrue("PatientUtil's own placeholder must be detected",
+                deltaCheckPriorResultDAO.isUnknownPlaceholderPatient(unknownPatientId));
+
+        seedOrderedSamplesForDeltaPatient();
+        assertFalse("a real patient must not be classified as the placeholder",
+                deltaCheckPriorResultDAO.isUnknownPlaceholderPatient("7861"));
     }
 
     @Test
