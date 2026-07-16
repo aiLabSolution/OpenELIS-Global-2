@@ -1,12 +1,29 @@
 package org.openelisglobal.resultvalidation.controller;
 
 import org.apache.commons.validator.GenericValidator;
+import org.openelisglobal.analysis.valueholder.Analysis;
+import org.openelisglobal.common.constants.Constants;
 import org.openelisglobal.common.controller.BaseController;
 import org.openelisglobal.internationalization.MessageUtil;
+import org.openelisglobal.role.service.RoleService;
+import org.openelisglobal.systemuser.controller.UnifiedSystemUserController;
+import org.openelisglobal.systemuser.service.UserService;
+import org.openelisglobal.userrole.valueholder.LabUnitRoleMap;
+import org.openelisglobal.userrole.valueholder.UserLabUnitRoles;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 public abstract class BaseResultValidationController extends BaseController {
 
     private String titleKey = "";
+
+    @Autowired
+    private UserService releaseAuthorityUserService;
+
+    @Autowired
+    private RoleService releaseAuthorityRoleService;
 
     @Override
     protected String getPageTitleKey() {
@@ -27,5 +44,60 @@ public abstract class BaseResultValidationController extends BaseController {
         if (!GenericValidator.isBlankOrNull(section)) {
             titleKey = section;
         }
+    }
+
+    /**
+     * LIS-56 release authority, checked at the exact decision point (the
+     * accepted-item branch of the save): accepting a held result finalizes it, and
+     * that authority belongs to the named pathologist login (RA 4688 / RA 5527),
+     * scoped to the lab units where the user holds the Validation (queue) role.
+     * Everything this check trusts is server-owned: the current authentication's
+     * authorities, the analysis loaded from the database (never the client bean),
+     * and the user's lab-unit role grants from the database. Rejection, paging and
+     * note edits are deliberately NOT gated here — those remain Validation-role
+     * work.
+     *
+     * <p>
+     * Throws {@link AccessDeniedException}: it reaches Spring Security's
+     * ExceptionTranslationFilter (ControllerSetup rethrows it past the generic
+     * RuntimeException advice), which answers 403 and records the denial through
+     * AuditingAccessDeniedHandler (LIS-5).
+     */
+    protected void requireReleaseAuthority(Analysis analysis, String sysUserId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean isPathologist = authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(granted -> "ROLE_PATHOLOGIST".equals(granted.getAuthority()));
+        if (!isPathologist) {
+            throw new AccessDeniedException("Releasing (accepting) a validation result requires the Pathologist role");
+        }
+
+        String analysisTestSectionId = analysis.getTestSection() == null ? null : analysis.getTestSection().getId();
+        if (analysisTestSectionId == null || !inValidationLabUnitScope(sysUserId, analysisTestSectionId)) {
+            throw new AccessDeniedException("Releasing analysis " + analysis.getId()
+                    + " is outside the user's Validation lab-unit scope (test section " + analysisTestSectionId + ")");
+        }
+    }
+
+    /**
+     * Whether the user holds the Validation role for the given test section —
+     * straight from the database-backed lab-unit role grants (the same grants that
+     * scope the validation queue), with the {@code AllLabUnits} wildcard honored.
+     */
+    private boolean inValidationLabUnitScope(String sysUserId, String testSectionId) {
+        String validationRoleId = releaseAuthorityRoleService.getRoleByName(Constants.ROLE_VALIDATION).getId();
+        UserLabUnitRoles labUnitRoles = releaseAuthorityUserService.getUserLabUnitRoles(sysUserId);
+        if (labUnitRoles == null || labUnitRoles.getLabUnitRoleMap() == null) {
+            return false;
+        }
+        for (LabUnitRoleMap unitRoles : labUnitRoles.getLabUnitRoleMap()) {
+            if (unitRoles.getRoles() == null || !unitRoles.getRoles().contains(validationRoleId)) {
+                continue;
+            }
+            if (UnifiedSystemUserController.ALL_LAB_UNITS.equals(unitRoles.getLabUnit())
+                    || testSectionId.equals(unitRoles.getLabUnit())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

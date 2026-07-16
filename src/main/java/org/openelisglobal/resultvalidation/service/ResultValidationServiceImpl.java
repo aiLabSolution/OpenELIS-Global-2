@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
+import org.openelisglobal.common.exception.LIMSRuntimeException;
 import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.services.IResultSaveService;
 import org.openelisglobal.common.services.IStatusService;
@@ -11,6 +12,8 @@ import org.openelisglobal.common.services.ResultSaveService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.common.services.StatusService.OrderStatus;
 import org.openelisglobal.common.services.registration.interfaces.IResultUpdate;
+import org.openelisglobal.common.util.ConfigurationProperties;
+import org.openelisglobal.common.util.ConfigurationProperties.Property;
 import org.openelisglobal.note.service.NoteService;
 import org.openelisglobal.note.valueholder.Note;
 import org.openelisglobal.notification.service.TestNotificationService;
@@ -47,6 +50,22 @@ public class ResultValidationServiceImpl implements ResultValidationService {
 
     @Override
     public void markAnalysisReleased(Analysis analysis, String sysUserId) {
+        // Fail-closed held-state guard (LIS-56): only an analysis actually
+        // sitting in the human validation queue is releasable — Technical
+        // Acceptance always, Technical Rejection only when the queue is
+        // configured to include it. The analysis handed in is loaded from the
+        // database by the caller, so its statusId is server truth; anything
+        // else (already Finalized, NotStarted, a tampered id...) must not be
+        // silently re-finalized.
+        String statusId = analysis.getStatusId();
+        boolean held = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance).equals(statusId)
+                || (ConfigurationProperties.getInstance().isPropertyValueEqual(Property.VALIDATE_REJECTED_TESTS, "true")
+                        && statusService.getStatusID(AnalysisStatus.TechnicalRejected).equals(statusId));
+        if (!held) {
+            throw new LIMSRuntimeException("Refusing to release analysis " + analysis.getId() + ": status " + statusId
+                    + " is not a releasable (held) validation-queue status");
+        }
+
         // Same transition the autoverification gate performs system-side
         // (AutoverificationGateServiceImpl#autoFinalize) — the two must stay in
         // lock-step for the released-state contract (Finalized + releasedDate).

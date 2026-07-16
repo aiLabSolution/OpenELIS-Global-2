@@ -39,25 +39,40 @@ import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.audittrail.dao.AuditTrailService;
 import org.openelisglobal.audittrail.daoimpl.AuditTrailServiceImpl;
 import org.openelisglobal.audittrail.valueholder.History;
+import org.openelisglobal.common.action.IActionConstants;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.dataexchange.fhir.FhirConfig;
 import org.openelisglobal.dataexchange.fhir.service.FhirFacilityOrganizationService;
 import org.openelisglobal.dataexchange.fhir.service.FhirTransformServiceImpl;
 import org.openelisglobal.history.service.HistoryService;
+import org.openelisglobal.login.valueholder.UserSessionData;
 import org.openelisglobal.referencetables.service.ReferenceTablesService;
 import org.openelisglobal.result.service.ResultService;
 import org.openelisglobal.result.valueholder.Result;
+import org.openelisglobal.resultvalidation.action.util.ResultValidationPaging;
+import org.openelisglobal.resultvalidation.bean.AnalysisItem;
+import org.openelisglobal.resultvalidation.controller.rest.AccessionValidationRestController;
+import org.openelisglobal.resultvalidation.form.ResultValidationForm;
 import org.openelisglobal.resultvalidation.service.ResultValidationService;
 import org.openelisglobal.resultvalidation.util.ResultValidationSaveService;
 import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.openelisglobal.test.service.TestService;
 import org.openelisglobal.testterminology.service.TestTerminologyMappingService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
  * LIS-56 §S5.5 — pathologist result-release, component-tested at the service
@@ -143,6 +158,9 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private AccessionValidationRestController accessionValidationRestController;
+
     private Object analysisServiceTarget;
     private AuditTrailService originalAnalysisAuditTrail;
     private String analysisRefTableId;
@@ -176,6 +194,7 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
         assertNotNull("ANALYSIS must be in reference_tables", analysisRefTableId);
 
         ensurePathologistUser();
+        seedPathologistValidationLabUnit();
         seedHeldSample();
     }
 
@@ -184,6 +203,12 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
         if (analysisServiceTarget != null) {
             ReflectionTestUtils.setField(analysisServiceTarget, "auditTrailService", originalAnalysisAuditTrail);
         }
+        SecurityContextHolder.clearContext();
+        RequestContextHolder.resetRequestAttributes();
+        jdbcTemplate.update("DELETE FROM clinlims.lab_unit_roles WHERE system_user_id = 8201");
+        jdbcTemplate.update("DELETE FROM clinlims.user_lab_unit_roles WHERE system_user_id = 8201");
+        jdbcTemplate.update("DELETE FROM clinlims.lab_roles WHERE lab_unit_role_map_id = 8240");
+        jdbcTemplate.update("DELETE FROM clinlims.lab_unit_role_map WHERE lab_unit_role_map_id = 8240");
         // the base class runs without a wrapping transaction, so the release is a
         // real commit — remove the runtime chain (history rows stay: append-only)
         jdbcTemplate.update("DELETE FROM clinlims.result WHERE analysis_id = 8265");
@@ -289,6 +314,139 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
     }
 
     /**
+     * AC1 end-to-end through the AUTHENTICATED endpoint (not the service seam): an
+     * authenticated pathologist, scoped to the analysis's lab unit, POSTs an
+     * accepted item through the real
+     * {@code AccessionValidationRestController#showAccessionValidationRangeSave}
+     * against the real database and paging session — and the analysis finalizes
+     * with the release AuditEvent. This is the path a regression that dropped the
+     * annotation, the {@code requireReleaseAuthority} call, or the release itself
+     * would break; the service-seam test above cannot see those.
+     */
+    @Test
+    public void release_throughAuthenticatedEndpoint_asScopedPathologist_finalizesAndAudits() throws Exception {
+        String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
+        String finalizedId = statusService.getStatusID(AnalysisStatus.Finalized);
+
+        Analysis before = analysisService.get(ANALYSIS_ID);
+        assertEquals("fixture must start held", technicalAcceptanceId, before.getStatusId());
+        // history for analysis 8265 is append-only and the id is reused across
+        // tests, so measure the DELTA this action makes, not the absolute count
+        long updateEventsBefore = countUpdateAuditEvents();
+
+        driveSaveEndpointAcceptingHeldAnalysis(authorities("ROLE_PATHOLOGIST", "ROLE_VALIDATION"));
+
+        Analysis released = analysisService.get(ANALYSIS_ID);
+        assertEquals("endpoint release must finalize the analysis", finalizedId, released.getStatusId());
+        assertNotNull("endpoint release must stamp the released date", released.getReleasedDate());
+
+        assertEquals("the endpoint release must write exactly one new update AuditEvent", updateEventsBefore + 1,
+                countUpdateAuditEvents());
+        List<History> events = historyService.getHistoryByRefIdAndRefTableId(ANALYSIS_ID, analysisRefTableId);
+        assertTrue("the release AuditEvent must attribute the named releasing pathologist", events.stream()
+                .anyMatch(h -> "U".equals(h.getActivity()) && PATHOLOGIST_SYS_USER_ID.equals(h.getSysUserId())));
+    }
+
+    /**
+     * AC1 no-mutation-on-deny: an authenticated user WITHOUT the pathologist role
+     * (Validation only) POSTing an accept is refused with
+     * {@link AccessDeniedException} at the release decision point, and the analysis
+     * is left untouched in the database — the persistence leg is never reached.
+     */
+    @Test
+    public void release_throughAuthenticatedEndpoint_withoutPathologistRole_isDeniedAndDoesNotMutate() {
+        String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
+        // append-only history + reused analysis id: assert this action adds NO new
+        // update AuditEvent, not that none exist (a prior test may have left one)
+        long updateEventsBefore = countUpdateAuditEvents();
+
+        assertThrows(AccessDeniedException.class,
+                () -> driveSaveEndpointAcceptingHeldAnalysis(authorities("ROLE_VALIDATION")));
+
+        Analysis untouched = analysisService.get(ANALYSIS_ID);
+        assertEquals("a denied release must not change the analysis status", technicalAcceptanceId,
+                untouched.getStatusId());
+        assertNull("a denied release must not stamp a released date", untouched.getReleasedDate());
+        assertEquals("a denied release must write no new update AuditEvent", updateEventsBefore,
+                countUpdateAuditEvents());
+    }
+
+    /** Count of update ('U') history rows for the held analysis under test. */
+    private long countUpdateAuditEvents() {
+        return historyService.getHistoryByRefIdAndRefTableId(ANALYSIS_ID, analysisRefTableId).stream()
+                .filter(h -> "U".equals(h.getActivity())).count();
+    }
+
+    /**
+     * Drive the real REST save handler in-process for the seeded held analysis
+     * (8265) with the given granted authorities. Populates the request-bound
+     * SecurityContext, the OE user-session attribution and the paging session cache
+     * exactly as production does (via ResultValidationPaging), then invokes the
+     * controller. The accepted item carries no result value, so the release is
+     * status-only (no result rows) — enough to exercise the authorization + release
+     * + audit path.
+     */
+    private void driveSaveEndpointAcceptingHeldAnalysis(List<SimpleGrantedAuthority> grantedAuthorities)
+            throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setMethod("POST");
+        request.setRequestURI("/rest/AccessionValidation");
+        MockHttpSession session = new MockHttpSession();
+        request.setSession(session);
+
+        UserSessionData usd = new UserSessionData();
+        usd.setSytemUserId(Integer.parseInt(PATHOLOGIST_SYS_USER_ID)); // upstream typo in the setter name
+        usd.setLoginName("dr.santos.pathologist");
+        session.setAttribute(IActionConstants.USER_SESSION_DATA, usd);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("dr.santos.pathologist", "n/a", grantedAuthorities));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        AnalysisItem item = new AnalysisItem();
+        item.setAnalysisId(ANALYSIS_ID);
+        item.setAccessionNumber("LIS56R1");
+        item.setReadOnly(false);
+        item.setIsAccepted(true);
+        item.setResultType("N");
+
+        ResultValidationForm form = new ResultValidationForm();
+        ResultValidationPaging paging = new ResultValidationPaging();
+        // stores the item in the session paged cache AND sets form.resultList /
+        // form.paging to page 1 — the same shape the GET populates
+        paging.setDatabaseResults(request, form, new ArrayList<>(List.of(item)));
+
+        accessionValidationRestController.showAccessionValidationRangeSave(request, form,
+                new BeanPropertyBindingResult(form, "form"));
+    }
+
+    private static List<SimpleGrantedAuthority> authorities(String... roles) {
+        List<SimpleGrantedAuthority> granted = new ArrayList<>();
+        for (String role : roles) {
+            granted.add(new SimpleGrantedAuthority(role));
+        }
+        return granted;
+    }
+
+    /**
+     * Grant user 8201 the Validation role on lab unit 8230 (the held analysis's
+     * test section) — the lab-unit scope requireReleaseAuthority checks. Raw SQL:
+     * the Validation role id comes from the Liquibase baseline.
+     */
+    private void seedPathologistValidationLabUnit() {
+        String validationRoleId = jdbcTemplate
+                .queryForObject("SELECT id::text FROM clinlims.system_role WHERE name = 'Validation'", String.class);
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.lab_unit_role_map (lab_unit_role_map_id, lab_unit)" + " VALUES (8240, '8230')");
+        jdbcTemplate.update("INSERT INTO clinlims.lab_roles (lab_unit_role_map_id, role) VALUES (8240, ?)",
+                validationRoleId);
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.user_lab_unit_roles (system_user_id, last_updated)" + " VALUES (8201, now())");
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.lab_unit_roles (system_user_id, lab_unit_role_map_id)" + " VALUES (8201, 8240)");
+    }
+
+    /**
      * The exact transition + persistence the three validation controllers perform
      * for an accepted item, under the named pathologist login.
      */
@@ -357,9 +515,9 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
         jdbcTemplate.update("INSERT INTO clinlims.sample_item (id, samp_id, sort_order, typeosamp_id, status_id,"
                 + " lastupdated, fhir_uuid) VALUES (8264, 8262, 1, 8215, ?::numeric, now(),"
                 + " '82640000-0000-0000-0000-000000008264')", sampleEnteredId);
-        jdbcTemplate.update("INSERT INTO clinlims.analysis (id, sampitem_id, test_id, status_id, analysis_type,"
-                + " revision, lastupdated, fhir_uuid) VALUES (8265, 8264, 8211, ?::numeric, 'MANUAL', '1',"
-                + " now(), '82650000-0000-0000-0000-000000008265')", technicalAcceptanceId);
+        jdbcTemplate.update("INSERT INTO clinlims.analysis (id, sampitem_id, test_id, test_sect_id, status_id,"
+                + " analysis_type, revision, lastupdated, fhir_uuid) VALUES (8265, 8264, 8211, 8230, ?::numeric,"
+                + " 'MANUAL', '1', now(), '82650000-0000-0000-0000-000000008265')", technicalAcceptanceId);
         jdbcTemplate.update("INSERT INTO clinlims.result (id, analysis_id, sort_order, result_type, value,"
                 + " is_reportable, significant_digits, lastupdated, fhir_uuid)"
                 + " VALUES (8266, 8265, 1, 'N', '5.2', 'Y', 1, now(), '82660000-0000-0000-0000-000000008266')");

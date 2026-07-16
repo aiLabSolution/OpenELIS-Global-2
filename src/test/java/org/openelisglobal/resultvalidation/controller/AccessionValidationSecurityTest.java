@@ -14,6 +14,7 @@ import org.junit.Test;
 import org.mockito.Mockito;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.common.constants.Constants;
+import org.openelisglobal.config.ControllerSetup;
 import org.openelisglobal.dataexchange.fhir.service.FhirTransformService;
 import org.openelisglobal.login.dao.UserModuleService;
 import org.openelisglobal.note.service.NoteService;
@@ -38,37 +39,44 @@ import org.openelisglobal.view.PageBuilderService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.stereotype.Controller;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.web.WebAppConfiguration;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
 /**
- * LIS-56 §S5.5 — the release-authority gate on the three result-validation save
- * endpoints. Accepting a held/flagged result finalizes it, so the save POSTs
- * are {@code @PreAuthorize("hasRole('PATHOLOGIST')")}: 401 unauthenticated, 403
- * for every non-pathologist role (including the "Validation" role that could
- * previously reach the endpoint, and Global Administrator — release authority
- * is a professional credential, not an IT permission), and a pathologist is
- * admitted through the gate. Auth ordering is asserted before any business
- * behavior so a refactor that drops an annotation is caught here (same
- * discipline as TestMethodRestControllerSecurityTest).
+ * LIS-56 — endpoint-boundary authorization on the three result-validation save
+ * POSTs. The saves handle paging, rejection AND release, so the endpoint admits
+ * validation-queue actors ({@code hasAnyRole('PATHOLOGIST','VALIDATION')}): 401
+ * unauthenticated, 403 for roles outside the queue (Results; and Global
+ * Administrator ALONE — see the caveat on that test), admission for Validation
+ * and Pathologist. The release decision itself is gated deeper, at the
+ * accepted-item branch ({@code requireReleaseAuthority}); that half —
+ * pathologist role + lab-unit scope, and the no-mutation-on-deny property — is
+ * proven end-to-end in PathologistReleaseComponentTest, because it needs the
+ * real paging session and database. This slice additionally pins the
+ * ControllerSetup interplay: an AccessDeniedException raised INSIDE a handler
+ * body must surface as 403, not be swallowed into a 500 by the generic
+ * RuntimeException advice (ControllerSetup is registered in this slice for
+ * exactly that reason).
  *
  * <p>
- * The pathologist admission probe uses the {@code pageResults=true} branch and
- * proves penetration by verifying the first collaborator the controller body
- * touches ({@code roleService.getRoleByName}) — deeper layers reach for
- * SpringContext statics that a security slice deliberately does not provide, so
- * asserting a full 200 here would be order-dependent on which application
- * context a prior test left behind.
+ * The admission probes stop at the first server-owned collaborator or the
+ * stale-page early return — deeper layers reach for SpringContext statics that
+ * a security slice deliberately does not provide, so asserting deeper behavior
+ * here would be order-dependent on which application context a prior test left
+ * behind.
  */
 @WebAppConfiguration
-@ContextConfiguration(classes = { AccessionValidationSecurityTest.TestConfig.class })
+@ContextConfiguration(classes = { AccessionValidationSecurityTest.TestConfig.class, ControllerSetup.class })
 @TestPropertySource("classpath:common.properties")
 public class AccessionValidationSecurityTest extends SecuritySliceMockMvcTest {
 
@@ -90,27 +98,44 @@ public class AccessionValidationSecurityTest extends SecuritySliceMockMvcTest {
     }
 
     @Test
-    public void restSave_validationRoleWithoutPathologist_returns403() throws Exception {
-        // "Validation" was the only role loosely associated with these pages before
-        // LIS-56 — it must NOT confer release authority
+    public void restSave_resultsRole_isOutsideTheValidationQueue_returns403() throws Exception {
         mockMvc.perform(post(REST_SAVE_PATH).contentType(MediaType.APPLICATION_JSON).content("{}")
-                .with(user("validator").roles("VALIDATION"))).andExpect(status().isForbidden());
+                .with(user("medtech").roles("RESULTS"))).andExpect(status().isForbidden());
         verifyZeroInteractions(roleService); // the request never reached the controller body
     }
 
+    /**
+     * Global Administrator authority ALONE does not admit — authority follows
+     * roles, not admin-ness. Caveat for the deployed default admin account: the
+     * upstream seeds grant it the Pathologist role (2.8 update_default_setting.xml)
+     * and Validation across AllLabUnits (2.7 add_admin_default_roles.xml), so the
+     * REAL default admin passes both this gate and the release gate; restricting
+     * that account is provisioning-runbook territory (follow-up filed) — the
+     * code-level contract pinned here is only that ADMIN grants nothing by itself.
+     */
     @Test
-    public void restSave_resultsRole_returns403() throws Exception {
+    public void restSave_globalAdminAlone_returns403() throws Exception {
         mockMvc.perform(post(REST_SAVE_PATH).contentType(MediaType.APPLICATION_JSON).content("{}")
-                .with(user("medtech").roles("RESULTS"))).andExpect(status().isForbidden());
+                .with(user("admin").roles("GLOBAL_ADMIN", "ADMIN"))).andExpect(status().isForbidden());
     }
 
     @Test
-    public void restSave_globalAdmin_isNotReleaseAuthority_returns403() throws Exception {
-        // deliberate strictness: release authority is the pathologist's professional
-        // credential (RA 4688 / RA 5527); an administrator must assign themselves the
-        // Pathologist role (an audited act) rather than release implicitly
-        mockMvc.perform(post(REST_SAVE_PATH).contentType(MediaType.APPLICATION_JSON).content("{}")
-                .with(user("admin").roles("GLOBAL_ADMIN", "ADMIN"))).andExpect(status().isForbidden());
+    public void restSave_validationRole_isAdmitted() throws Exception {
+        // Validation-role users keep paging, rejection and note edits: the
+        // endpoint admits them; only the accepted-item branch requires the
+        // pathologist (proven end-to-end in PathologistReleaseComponentTest).
+        int status;
+        try {
+            status = mockMvc
+                    .perform(post(REST_SAVE_PATH + "?pageResults=true").contentType(MediaType.APPLICATION_JSON)
+                            .content("{}").with(user("validator").roles("VALIDATION")))
+                    .andReturn().getResponse().getStatus();
+        } catch (Exception e) {
+            status = -1;
+        }
+        assertNotEquals("validation role must not be rejected at the endpoint", 401, status);
+        assertNotEquals("validation role must not be rejected at the endpoint", 403, status);
+        verify(roleService).getRoleByName(Constants.ROLE_VALIDATION);
     }
 
     @Test
@@ -132,6 +157,20 @@ public class AccessionValidationSecurityTest extends SecuritySliceMockMvcTest {
         verify(roleService).getRoleByName(Constants.ROLE_VALIDATION);
     }
 
+    /**
+     * Regression pin for the ControllerSetup contract this slice registers the real
+     * advice for: an AccessDeniedException thrown INSIDE a handler body (the shape
+     * requireReleaseAuthority produces at the accepted-item branch) must pass the
+     * generic RuntimeException advice untouched and surface as 403 through the
+     * security filter chain. If someone removes the rethrowing handler from
+     * ControllerSetup, this becomes a 500 and fails here.
+     */
+    @Test
+    public void accessDeniedRaisedInsideHandlerBody_surfacesAs403_notAdviceSwallowed500() throws Exception {
+        mockMvc.perform(post("/test/lis56-denied-probe").with(user("validator").roles("VALIDATION")))
+                .andExpect(status().isForbidden());
+    }
+
     @Test
     public void legacyResultValidationSave_withoutAuthentication_returns401() throws Exception {
         mockMvc.perform(post("/ResultValidation").contentType(MediaType.APPLICATION_FORM_URLENCODED))
@@ -139,15 +178,24 @@ public class AccessionValidationSecurityTest extends SecuritySliceMockMvcTest {
     }
 
     @Test
-    public void legacyResultValidationSave_nonPathologist_returns403() throws Exception {
+    public void legacyResultValidationSave_roleOutsideQueue_returns403() throws Exception {
         mockMvc.perform(post("/ResultValidation").contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .with(user("validator").roles("VALIDATION"))).andExpect(status().isForbidden());
+                .with(user("medtech").roles("RESULTS"))).andExpect(status().isForbidden());
     }
 
     @Test
-    public void legacyAccessionValidationRangeSave_nonPathologist_returns403() throws Exception {
+    public void legacyAccessionValidationRangeSave_roleOutsideQueue_returns403() throws Exception {
         mockMvc.perform(post("/AccessionValidationRange").contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .with(user("validator").roles("VALIDATION"))).andExpect(status().isForbidden());
+                .with(user("medtech").roles("RESULTS"))).andExpect(status().isForbidden());
+    }
+
+    /** Throws the exact exception shape requireReleaseAuthority produces. */
+    @Controller
+    static class DeniedProbeController {
+        @PostMapping("/test/lis56-denied-probe")
+        public String deny() {
+            throw new AccessDeniedException("probe: release authority denied inside the handler body");
+        }
     }
 
     /**
@@ -170,6 +218,11 @@ public class AccessionValidationSecurityTest extends SecuritySliceMockMvcTest {
             http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated()).httpBasic(Customizer.withDefaults())
                     .csrf(csrf -> csrf.disable());
             return http.build();
+        }
+
+        @Bean
+        DeniedProbeController deniedProbeController() {
+            return new DeniedProbeController();
         }
 
         @Bean

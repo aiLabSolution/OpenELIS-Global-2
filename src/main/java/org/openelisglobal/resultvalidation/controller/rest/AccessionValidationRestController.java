@@ -259,16 +259,16 @@ public class AccessionValidationRestController extends BaseResultValidationContr
     }
 
     /**
-     * LIS-56: release authority. Accepting a held/flagged result finalizes it —
-     * that authority belongs to the named pathologist login (RA 4688 / RA 5527), so
-     * the save is role-gated; everyone else gets 403. The seeded "Pathologist" role
-     * normalizes to ROLE_PATHOLOGIST for form and SSO logins alike
-     * (CustomUserDetailsService.toRoleAuthority). The legacy module interceptor
-     * does NOT cover this endpoint (no system_module_url row for the /rest path —
-     * it fail-opens for any authenticated user), so this annotation is the only
-     * gate on the release action.
+     * LIS-56: this save handles paging, rejection AND release. Endpoint access is
+     * for validation-queue actors (the legacy module interceptor does NOT cover
+     * this endpoint — no system_module_url row for the /rest path — so it
+     * fail-opened to any authenticated user before this annotation). The RELEASE
+     * decision itself is gated separately and precisely at the accepted-item branch
+     * by {@code requireReleaseAuthority} — pathologist role + lab-unit scope — so
+     * Validation-role users keep paging and rejection. Role names normalize via
+     * CustomUserDetailsService.toRoleAuthority for form and SSO logins alike.
      */
-    @PreAuthorize("hasRole('PATHOLOGIST')")
+    @PreAuthorize("hasAnyRole('PATHOLOGIST', 'VALIDATION')")
     @PostMapping(value = "AccessionValidation", produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public ResultValidationForm showAccessionValidationRangeSave(HttpServletRequest request,
@@ -423,6 +423,7 @@ public class AccessionValidationRestController extends BaseResultValidationContr
                 if (!analysisIdList.contains(analysis.getId())) {
 
                     if (analysisItem.getIsAccepted()) {
+                        requireReleaseAuthority(analysis, getSysUserId(request));
                         resultValidationService.markAnalysisReleased(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);

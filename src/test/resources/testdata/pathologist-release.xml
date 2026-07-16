@@ -22,4 +22,11 @@
     <type_of_sample id="8215" description="Serum LIS56"
         domain="H" name_localization_id="8210"
         lastupdated="2026-07-16 08:00:00" />
+
+    <!-- lab unit for the release lab-unit-scope gate (analysis 8265 belongs
+        here; the pathologist's Validation grant targets this section id) -->
+    <test_section id="8230" name="LIS56 Chemistry"
+        description="LIS56 release test section" is_external="N"
+        lastupdated="2026-07-16 08:00:00" sort_order="2147483629"
+        name_localization_id="8210" display_key="LIS56Section" />
 </dataset>

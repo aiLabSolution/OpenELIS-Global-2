@@ -211,9 +211,10 @@ public class ResultValidationController extends BaseResultValidationController {
         return validationStatus;
     }
 
-    // LIS-56: release authority — same gate as the REST save; see
+    // LIS-56: endpoint access for validation-queue actors; the release decision
+    // itself is gated at the accepted-item branch (requireReleaseAuthority) — see
     // AccessionValidationRestController#showAccessionValidationRangeSave.
-    @PreAuthorize("hasRole('PATHOLOGIST')")
+    @PreAuthorize("hasAnyRole('PATHOLOGIST', 'VALIDATION')")
     @RequestMapping(value = "/ResultValidation", method = RequestMethod.POST)
     public ModelAndView showResultValidationSave(HttpServletRequest request,
             @ModelAttribute("form") @Validated(ResultValidationForm.ResultValidation.class) ResultValidationForm form,
@@ -389,6 +390,7 @@ public class ResultValidationController extends BaseResultValidationController {
                 if (!analysisIdList.contains(analysis.getId())) {
 
                     if (analysisItem.getIsAccepted()) {
+                        requireReleaseAuthority(analysis, getSysUserId(request));
                         resultValidationService.markAnalysisReleased(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);

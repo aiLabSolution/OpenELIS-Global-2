@@ -19,10 +19,14 @@ public interface ResultValidationService {
     /**
      * The release transition of the human result-validation path: stamps the named
      * releasing user as the audit attribution, moves the analysis to Finalized and
-     * records the release moment. Mutates in place; persisting the analysis
-     * afterwards through {@code AnalysisService#update} (persistdata's analysis
-     * leg) writes the before/after transition to the append-only history table —
-     * that row is the release audit record (LIS-56).
+     * records the release moment. Fail-closed: refuses (throws) unless the analysis
+     * is currently in a held validation-queue status (Technical Acceptance, or
+     * Technical Rejection when VALIDATE_REJECTED_TESTS is on) — the caller must
+     * hand in the database-loaded analysis, never a client-built one. Mutates in
+     * place; persisting the analysis afterwards through
+     * {@code AnalysisService#update} (persistdata's analysis leg) writes the
+     * before/after transition to the append-only history table — that row is the
+     * release audit record (LIS-56).
      */
     void markAnalysisReleased(Analysis analysis, String sysUserId);
 }

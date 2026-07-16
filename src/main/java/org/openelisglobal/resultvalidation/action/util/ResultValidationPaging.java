@@ -18,6 +18,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
 import org.openelisglobal.common.action.IActionConstants;
+import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.paging.IPageDivider;
 import org.openelisglobal.common.paging.IPageFlattener;
 import org.openelisglobal.common.paging.IPageUpdater;
@@ -111,10 +112,38 @@ public class ResultValidationPaging {
             }
         }
 
+        /**
+         * LIS-56: merge only the client's DECISION fields onto the server-cached items.
+         * The cache previously took the client objects wholesale, which made every
+         * field — including analysisId, readOnly and the identity fields the downstream
+         * save trusts — client-controlled at save time: a tampered analysisId could
+         * release an analysis outside the queue page the user was shown. The merge
+         * stays positional (the client posts the page exactly as served — one item per
+         * result row, so several rows can share an analysisId and an id-keyed merge
+         * would collapse them), but identity now stays server-owned: a row whose client
+         * analysisId does not match the cached row is ignored rather than trusted.
+         */
         @Override
         public void updateCache(List<AnalysisItem> cacheItems, List<AnalysisItem> clientItems) {
-            for (int i = 0; i < clientItems.size(); i++) {
-                cacheItems.set(i, clientItems.get(i));
+            for (int i = 0; i < cacheItems.size() && i < clientItems.size(); i++) {
+                AnalysisItem cacheItem = cacheItems.get(i);
+                AnalysisItem clientItem = clientItems.get(i);
+                if (cacheItem.getAnalysisId() == null
+                        || !cacheItem.getAnalysisId().equals(clientItem.getAnalysisId())) {
+                    LogEvent.logWarn("ResultValidationPaging", "updateCache",
+                            "client row " + i + " does not match the cached page row (analysisId "
+                                    + clientItem.getAnalysisId() + " vs cached " + cacheItem.getAnalysisId()
+                                    + ") — client edits for that row ignored");
+                    continue;
+                }
+                cacheItem.setIsAccepted(clientItem.getIsAccepted());
+                cacheItem.setIsRejected(clientItem.getIsRejected());
+                cacheItem.setNote(clientItem.getNote());
+                cacheItem.setResult(clientItem.getResult());
+                cacheItem.setQualifiedResultValue(clientItem.getQualifiedResultValue());
+                cacheItem.setMultiSelectResultValues(clientItem.getMultiSelectResultValues());
+                cacheItem.setSampleIsAccepted(clientItem.isSampleIsAccepted());
+                cacheItem.setSampleIsRejected(clientItem.isSampleIsRejected());
             }
         }
 
