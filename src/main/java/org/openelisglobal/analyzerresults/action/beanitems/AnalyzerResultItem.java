@@ -81,6 +81,13 @@ public class AnalyzerResultItem implements Serializable {
     // legacy form path; never rely on that alone.
     private Timestamp stagingCompleteDate;
 
+    // Transient: the staging row's wire patient identity, used by the LIS-239
+    // same-day patient-mismatch linked-correction guard. Same tamper defense
+    // as stagingCompleteDate above: hydrateStagingFlags overwrites it
+    // UNCONDITIONALLY from the DB before any read — a posted value CAN land
+    // here via the Jackson-bound REST path and must never be trusted.
+    private String stagingPatientHint;
+
     private boolean isPositive = false;
     private String duplicateAnalyzerResultId;
     private boolean isHighlighted = false;
@@ -313,6 +320,14 @@ public class AnalyzerResultItem implements Serializable {
 
     public Timestamp getStagingCompleteDate() {
         return stagingCompleteDate;
+    }
+
+    public void setStagingPatientHint(String stagingPatientHint) {
+        this.stagingPatientHint = stagingPatientHint;
+    }
+
+    public String getStagingPatientHint() {
+        return stagingPatientHint;
     }
 
     public void setPositive(boolean isPositive) {

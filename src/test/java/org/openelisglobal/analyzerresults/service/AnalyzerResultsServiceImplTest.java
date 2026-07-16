@@ -208,6 +208,75 @@ public class AnalyzerResultsServiceImplTest {
         assertEquals("new-id-777", patientA.getDuplicateAnalyzerResultId());
     }
 
+    // ------------------------------------------------------------------
+    // LIS-239 — patient-hint dimension on the idempotency check. Two
+    // non-blank hints that differ positively identify DIFFERENT patients:
+    // an "identical" arrival (same key, date, value) under a shared sentinel
+    // accession must stage as a linked correction, never skip. A null/blank
+    // hint on either side carries no signal (pre-migration rows, sources
+    // without patient identity) and preserves idempotency.
+    // ------------------------------------------------------------------
+
+    @Test
+    public void sameDateSameValue_conflictingPatientHints_stagesLinkedCorrection() {
+        Timestamp when = new Timestamp(1_700_000_000_000L);
+        AnalyzerResults existing = existingRow("patient-A-row", "4.0", when);
+        existing.setPatientHint("PAT-A");
+        AnalyzerResults incoming = newIncoming("4.0", when); // same value, SAME date
+        incoming.setPatientHint("PAT-B");
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
+
+        service.insertAnalyzerResults(List.of(incoming), USER_ID);
+
+        verify(baseObjectDAO, times(1)).insert(incoming);
+        verify(baseObjectDAO, times(1)).update(existing);
+        assertTrue("a different patient's identical-looking result must surface, not vanish", incoming.isReadOnly());
+        assertEquals("patient-A-row", incoming.getDuplicateAnalyzerResultId());
+    }
+
+    @Test
+    public void sameDateSameValue_equalPatientHints_skipsAsTrueReImport() {
+        Timestamp when = new Timestamp(1_700_000_000_000L);
+        AnalyzerResults existing = existingRow("42", "4.0", when);
+        existing.setPatientHint("PAT-A");
+        AnalyzerResults incoming = newIncoming("4.0", when);
+        incoming.setPatientHint("PAT-A");
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
+
+        service.insertAnalyzerResults(List.of(incoming), USER_ID);
+
+        verify(baseObjectDAO, never()).insert(any(AnalyzerResults.class));
+        verify(baseObjectDAO, never()).update(any(AnalyzerResults.class));
+    }
+
+    @Test
+    public void sameDateSameValue_hintOnOneSideOnly_skipsAsTrueReImport() {
+        // A pre-migration staged row (null hint) re-POSTed after the bridge
+        // started forwarding identities must stay idempotent — one-sided hints
+        // carry no mismatch signal.
+        Timestamp when = new Timestamp(1_700_000_000_000L);
+        AnalyzerResults existing = existingRow("42", "4.0", when); // no hint
+        AnalyzerResults incoming = newIncoming("4.0", when);
+        incoming.setPatientHint("PAT-A");
+        when(baseObjectDAO.getDuplicateResultByAccessionAndTest(incoming)).thenReturn(List.of(existing));
+
+        service.insertAnalyzerResults(List.of(incoming), USER_ID);
+
+        verify(baseObjectDAO, never()).insert(any(AnalyzerResults.class));
+        verify(baseObjectDAO, never()).update(any(AnalyzerResults.class));
+    }
+
+    @Test
+    public void patientHintsConflict_blankNeverConflicts() {
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict(null, "PAT-A"));
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict("PAT-A", null));
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict("", "PAT-A"));
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict("  ", "PAT-A"));
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict(null, null));
+        assertFalse(AnalyzerResultsServiceImpl.patientHintsConflict("PAT-A", "PAT-A"));
+        assertTrue(AnalyzerResultsServiceImpl.patientHintsConflict("PAT-A", "PAT-B"));
+    }
+
     @Test
     public void reImport_bothNullDates_sameValue_skipsAsTrueReImport() {
         // Timestamp-less analyzers: null completeDate on both sides + equal value

@@ -178,4 +178,7 @@
   <!-- LIS-111 (follows LIS-187/053): sync the EDAN H60S map to the full H99S panel (30 CBC+DIFF codes of 052 + PDW of 055); the pilot H60S emits the same panel as the H99S. Renumbered 056->058 on merge with main: #40 (LIS-133) took 056 and open PR #39 (LIS-54) claims 057. -->
   <include relativeToChangelogFile="true" file="058-edan-h60s-full-panel-seed.xml"/>
 
+  <!-- LIS-239: carry the bridge's wire patient identity into analyzer staging so same-day two-patient collisions under a shared/reused accession block USE at accept. 057 = LIS-54 (merged), 058 = LIS-111. -->
+  <include relativeToChangelogFile="true" file="059-analyzer-results-patient-hint.xml"/>
+
 </databaseChangeLog>

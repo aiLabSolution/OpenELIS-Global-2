@@ -283,6 +283,9 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             // completeDate/stagingCompleteDate can land on the item and must never
             // be trusted.
             item.setStagingCompleteDate(entity.getCompleteDate());
+            // the staging row's wire patient identity, for the LIS-239 same-day
+            // patient-mismatch guard — same unconditional-overwrite tamper defense.
+            item.setStagingPatientHint(entity.getPatientHint());
         }
     }
 
@@ -308,10 +311,21 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
      * and does not block (current behavior preserved). The orphan corner — the
      * backlinked original invisible to {@code findPartner} because it is itself
      * readOnly (e.g. an unmapped row forced readOnly at hydration) — is guarded
-     * too, via a DB lookup of the backlinked staging row's completeDate. Residual:
-     * a same-day two-patient collision under a sentinel accession carries no
-     * distinguishing signal in staging (no patient dimension) and is not detectable
-     * here.
+     * too, via a DB lookup of the backlinked staging row's completeDate.
+     * </p>
+     *
+     * <p>
+     * LIS-239 patient-mismatch guard: a linked pair whose two staging rows carry
+     * two DIFFERENT non-blank {@code patientHint} values (the wire patient identity
+     * the bridge forwards, e.g. HL7 PID-2) is a same-day two-patient collision
+     * under a shared sentinel or mislabeled accession — never an analyzer corrected
+     * re-export — so USE is refused fail-closed the same way. The comparison uses
+     * the DB-hydrated {@code stagingPatientHint} ({@link #hydrateStagingFlags}),
+     * never posted state; the orphan corner is guarded via the same backlinked-row
+     * DB lookup as cross-day. A null/blank hint on either side carries no signal
+     * and does not block — a collision where the source sent no patient identity
+     * remains undetectable here (that narrower residual is inherent to the wire
+     * data, not the staging schema).
      * </p>
      */
     void resolveLinkedCorrections(List<AnalyzerResultItem> items) {
@@ -322,6 +336,7 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
 
         List<String> unresolved = new ArrayList<>();
         List<String> crossDay = new ArrayList<>();
+        List<String> patientMismatch = new ArrayList<>();
 
         for (List<AnalyzerResultItem> group : groupedByNumber.values()) {
             GroupAction groupAction = resolveGroupAction(group);
@@ -373,6 +388,11 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
                             crossDay.add(item.getAccessionNumber() + " : " + item.getTestName());
                             continue;
                         }
+                        if (linkedOriginal != null && AnalyzerResultsServiceImpl
+                                .patientHintsConflict(item.getStagingPatientHint(), linkedOriginal.getPatientHint())) {
+                            patientMismatch.add(item.getAccessionNumber() + " : " + item.getTestName());
+                            continue;
+                        }
                         // orphan correction — its own group header, the original is gone
                         appendAutoNote(item, "note.analyzer.correction.applied.orphan", item.getResult());
                         item.setReadOnly(false);
@@ -381,6 +401,11 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
                         // not an analyzer correction — refuse USE fail-closed, leave the
                         // partner unconsumed and all staging rows intact
                         crossDay.add(item.getAccessionNumber() + " : " + item.getTestName());
+                    } else if (isPatientMismatchPair(item, partner)) {
+                        // LIS-239: two different wire patient identities under one
+                        // accession = same-day two-patient collision, not a correction
+                        // — refuse USE fail-closed, all staging rows intact
+                        patientMismatch.add(item.getAccessionNumber() + " : " + item.getTestName());
                     } else if (!usedPartners.add(partner)) {
                         // two corrections both USE onto the same original is ambiguous
                         unresolved.add(item.getAccessionNumber() + " : " + item.getTestName());
@@ -408,6 +433,10 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
             throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.correction.crossday",
                     new String[] { String.join("; ", crossDay) }));
         }
+        if (!patientMismatch.isEmpty()) {
+            throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.correction.patientmismatch",
+                    new String[] { String.join("; ", patientMismatch) }));
+        }
         if (!unresolved.isEmpty()) {
             throw new UnresolvedCorrectionException(MessageUtil.getMessage("error.analyzer.correction.unresolved",
                     new String[] { String.join("; ", unresolved) }));
@@ -425,6 +454,16 @@ public class AnalyzerResultsAcceptServiceImpl implements AnalyzerResultsAcceptSe
      */
     private boolean isCrossDayPair(AnalyzerResultItem correction, AnalyzerResultItem partner) {
         return isCrossDay(correction.getStagingCompleteDate(), partner.getStagingCompleteDate());
+    }
+
+    /**
+     * True when the correction and its partner carry two DIFFERENT non-blank wire
+     * patient identities per their DB-hydrated staging patient hints (LIS-239).
+     * Null/blank on either side = no signal = no block.
+     */
+    private boolean isPatientMismatchPair(AnalyzerResultItem correction, AnalyzerResultItem partner) {
+        return AnalyzerResultsServiceImpl.patientHintsConflict(correction.getStagingPatientHint(),
+                partner.getStagingPatientHint());
     }
 
     /**

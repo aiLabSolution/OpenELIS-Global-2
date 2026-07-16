@@ -130,6 +130,66 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         org.junit.Assert.assertNull(rawOnly.getRawUnit());
         org.junit.Assert.assertNull(rawOnly.getUcumValue());
         org.junit.Assert.assertEquals("UNMAPPED", rawOnly.getNormalizationStatus());
+        org.junit.Assert.assertNull("no Patient in bundle — hint must stay null", rawOnly.getPatientHint());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_PatientResource_MapsWirePatientIdentityToPatientHint() throws Exception {
+        // LIS-239: the bridge emits a Patient resource carrying the wire patient
+        // identity (identifier under the analyzer-patient-id system) and points
+        // each Observation.subject at it. The import must carry that identity
+        // into analyzer_results.patient_hint; an Observation without a subject
+        // stages with a null hint (no signal).
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:patient-1\",\"resource\":{" + "\"resourceType\":\"Patient\","
+                + "\"identifier\":[{\"system\":\"http://openelis-global.org/fhir/analyzer-patient-id\","
+                + "\"value\":\"PID2-0007\"}]}}," + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"HL7-UNKNOWN\"}],"
+                + "\"subject\":{\"reference\":\"urn:uuid:patient-1\"}}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"subject\":{\"reference\":\"urn:uuid:patient-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"HGB\"}]},\"valueString\":\"13.1\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(2));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
+        org.junit.Assert.assertEquals(2, inserted.size());
+        org.junit.Assert.assertEquals("subject-linked observation must carry the wire patient identity", "PID2-0007",
+                inserted.get(0).getPatientHint());
+        org.junit.Assert.assertNull("subject-less observation must stage with a null hint",
+                inserted.get(1).getPatientHint());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_PatientWithForeignIdentifierSystem_FallsBackToFirstIdentifier() throws Exception {
+        // A Patient without the analyzer-patient-id system still identifies the
+        // patient — fall back to its first valued identifier rather than dropping
+        // the signal.
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:patient-9\",\"resource\":{" + "\"resourceType\":\"Patient\","
+                + "\"identifier\":[{\"system\":\"urn:some:other:system\",\"value\":\"MRN-42\"}]}},"
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"ACC-9\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"subject\":{\"reference\":\"urn:uuid:patient-9\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        org.junit.Assert.assertEquals("MRN-42", ((AnalyzerResults) captor.getValue().get(0)).getPatientHint());
     }
 
     @Test
