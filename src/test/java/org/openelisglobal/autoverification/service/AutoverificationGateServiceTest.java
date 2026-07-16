@@ -816,4 +816,17 @@ public class AutoverificationGateServiceTest {
         reportType.setId(RESULT_REPORT_ID);
         when(documentTypeService.getDocumentTypeByName("resultExport")).thenReturn(reportType);
     }
+
+    @Test
+    public void fhirTransformServiceInjection_mustStayLazy_orProductionContextCannotBoot() throws Exception {
+        // Tripwire, not a boot test: fhirTransformServiceImpl is in a circular
+        // reference with fhirReferralServiceImpl and gets @Async-proxied after
+        // creation. An eager injection here pulls it into existence mid-cycle and
+        // Spring aborts startup ("injected in its raw version ... eventually
+        // wrapped") — every test context mocks FhirTransformService, so only the
+        // deploy-kit clean-box smoke gate boots the real graph. Keep @Lazy.
+        Field field = AutoverificationGateServiceImpl.class.getDeclaredField("fhirTransformService");
+        assertTrue("fhirTransformService must be injected @Lazy — removing it breaks production context boot",
+                field.isAnnotationPresent(org.springframework.context.annotation.Lazy.class));
+    }
 }
