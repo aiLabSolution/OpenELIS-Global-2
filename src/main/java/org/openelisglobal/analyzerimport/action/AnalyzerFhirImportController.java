@@ -24,6 +24,7 @@ import org.hl7.fhir.r4.model.Device;
 import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Patient;
+import org.hl7.fhir.r4.model.Quantity;
 import org.hl7.fhir.r4.model.Resource;
 import org.hl7.fhir.r4.model.Specimen;
 import org.openelisglobal.analyzer.service.AnalyzerService;
@@ -533,14 +534,21 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         }
 
         // Result value
-        if (obs.hasValueQuantity()) {
-            ar.setResult(obs.getValueQuantity().getValue().toPlainString());
-            ar.setUnits(obs.getValueQuantity().getUnit());
-            ar.setRawUnit(truncateForStaging(obs.getValueQuantity().getUnit(), AnalyzerResults.RAW_UNIT_MAX_LENGTH,
-                    "raw_unit", ar.getAccessionNumber()));
-            if (UCUM_SYSTEM.equals(obs.getValueQuantity().getSystem()) && obs.getValueQuantity().hasCode()) {
-                ar.setUcumValue(truncateForStaging(obs.getValueQuantity().getCode(),
-                        AnalyzerResults.UCUM_VALUE_MAX_LENGTH, "ucum_value", ar.getAccessionNumber()));
+        if (obs.hasValueQuantity() && obs.getValueQuantity().hasValue()) {
+            Quantity qty = obs.getValueQuantity();
+            // Off-scale qualified results arrive as Quantity.comparator + magnitude
+            // (bridge, LIS-252). Reconstruct the human-readable qualified value
+            // (<0.008, >=500) — the comparator codes "<", "<=", ">=", ">" are the
+            // reportable symbols — and stage it as a numeric result, exactly how OE
+            // stores a manually entered qualified numeric at accept.
+            String magnitude = qty.getValue().toPlainString();
+            ar.setResult(qty.hasComparator() ? qty.getComparator().toCode() + magnitude : magnitude);
+            ar.setUnits(qty.getUnit());
+            ar.setRawUnit(truncateForStaging(qty.getUnit(), AnalyzerResults.RAW_UNIT_MAX_LENGTH, "raw_unit",
+                    ar.getAccessionNumber()));
+            if (UCUM_SYSTEM.equals(qty.getSystem()) && qty.hasCode()) {
+                ar.setUcumValue(truncateForStaging(qty.getCode(), AnalyzerResults.UCUM_VALUE_MAX_LENGTH, "ucum_value",
+                        ar.getAccessionNumber()));
             }
             ar.setResultType("N");
         } else if (obs.hasValueStringType()) {
