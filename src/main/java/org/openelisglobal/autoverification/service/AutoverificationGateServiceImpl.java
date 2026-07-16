@@ -44,6 +44,7 @@ import org.openelisglobal.sample.valueholder.Sample;
 import org.openelisglobal.samplehuman.service.SampleHumanService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -161,7 +162,15 @@ public class AutoverificationGateServiceImpl implements AutoverificationGateServ
     @Autowired
     private TestNotificationService testNotificationService;
 
+    // @Lazy: fhirTransformServiceImpl sits in a circular reference with
+    // fhirReferralServiceImpl and is @Async-proxied after creation. Injecting it
+    // eagerly here pulls it into existence mid-cycle (this gate is created early
+    // via
+    // analyzerResultsAcceptServiceImpl) while its raw instance is already injected
+    // elsewhere, and Spring aborts context startup. First use is post-boot
+    // (afterCommit export), so a lazy proxy is safe.
     @Autowired
+    @Lazy
     private FhirTransformService fhirTransformService;
 
     @Autowired
