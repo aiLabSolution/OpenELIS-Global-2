@@ -148,6 +148,9 @@
         <class>org.openelisglobal.qc.valueholder.WestgardRuleConfig</class>
         <class>org.openelisglobal.qc.valueholder.QCAlert</class>
 
+        <!-- Delta-check thresholds (LIS-54) -->
+        <class>org.openelisglobal.autoverification.valueholder.DeltaCheckConfig</class>
+
         <!-- RS232 Serial Port Configuration entity (011-madagascar-analyzer-integration
             M2) -->
         <class>org.openelisglobal.analyzer.valueholder.SerialPortConfiguration</class>
