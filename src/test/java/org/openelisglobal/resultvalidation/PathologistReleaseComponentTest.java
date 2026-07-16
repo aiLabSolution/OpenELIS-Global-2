@@ -209,6 +209,9 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
         jdbcTemplate.update("DELETE FROM clinlims.user_lab_unit_roles WHERE system_user_id = 8201");
         jdbcTemplate.update("DELETE FROM clinlims.lab_roles WHERE lab_unit_role_map_id = 8240");
         jdbcTemplate.update("DELETE FROM clinlims.lab_unit_role_map WHERE lab_unit_role_map_id = 8240");
+        // remove the sentinel Validation role only if this test created it (no-op
+        // when the baseline role was present) so it can't shadow the baseline row
+        jdbcTemplate.update("DELETE FROM clinlims.system_role WHERE id = 8280");
         // the base class runs without a wrapping transaction, so the release is a
         // real commit — remove the runtime chain (history rows stay: append-only)
         jdbcTemplate.update("DELETE FROM clinlims.result WHERE analysis_id = 8265");
@@ -371,6 +374,34 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
                 countUpdateAuditEvents());
     }
 
+    /**
+     * Lab-unit scope half of {@code requireReleaseAuthority}: a pathologist whose
+     * Validation grant is on a DIFFERENT lab unit than the analysis's test section
+     * is denied (cross-unit deny), with no mutation — the pathologist role alone is
+     * not enough. Complements the positive same-unit-allow path exercised by
+     * {@link #release_throughAuthenticatedEndpoint_asScopedPathologist_finalizesAndAudits}
+     * (user 8201's Validation grant is on section 8230, the analysis's section).
+     */
+    @Test
+    public void release_throughAuthenticatedEndpoint_pathologistOutsideLabUnit_isDeniedAndDoesNotMutate() {
+        String technicalAcceptanceId = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance);
+        // re-point 8201's Validation grant to a lab unit that is NOT the analysis's
+        // test section (8230), leaving the pathologist role intact
+        jdbcTemplate.update(
+                "UPDATE clinlims.lab_unit_role_map SET lab_unit = '9999'" + " WHERE lab_unit_role_map_id = 8240");
+        long updateEventsBefore = countUpdateAuditEvents();
+
+        assertThrows(AccessDeniedException.class,
+                () -> driveSaveEndpointAcceptingHeldAnalysis(authorities("ROLE_PATHOLOGIST", "ROLE_VALIDATION")));
+
+        Analysis untouched = analysisService.get(ANALYSIS_ID);
+        assertEquals("a cross-lab-unit release must not change the analysis status", technicalAcceptanceId,
+                untouched.getStatusId());
+        assertNull("a cross-lab-unit release must not stamp a released date", untouched.getReleasedDate());
+        assertEquals("a cross-lab-unit release must write no new update AuditEvent", updateEventsBefore,
+                countUpdateAuditEvents());
+    }
+
     /** Count of update ('U') history rows for the held analysis under test. */
     private long countUpdateAuditEvents() {
         return historyService.getHistoryByRefIdAndRefTableId(ANALYSIS_ID, analysisRefTableId).stream()
@@ -430,10 +461,18 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
 
     /**
      * Grant user 8201 the Validation role on lab unit 8230 (the held analysis's
-     * test section) — the lab-unit scope requireReleaseAuthority checks. Raw SQL:
-     * the Validation role id comes from the Liquibase baseline.
+     * test section) — the lab-unit scope requireReleaseAuthority checks (and the
+     * role the production code resolves by name at release time). The Validation
+     * system_role normally comes from the Liquibase baseline, but a sibling test's
+     * {@code executeDataSetWithStateManagement} can TRUNCATE system_role and not
+     * restore it (full-suite order dependence), so heal it idempotently with a
+     * sentinel id before use — same defensive pattern as {@link #ensureStatusRow}.
      */
     private void seedPathologistValidationLabUnit() {
+        jdbcTemplate.update("INSERT INTO clinlims.system_role (id, name, description, is_grouping_role, display_key,"
+                + " active, editable) SELECT 8280, 'Validation', 'A person who can validate results', false,"
+                + " 'role.validator', true, true"
+                + " WHERE NOT EXISTS (SELECT 1 FROM clinlims.system_role WHERE name = 'Validation')");
         String validationRoleId = jdbcTemplate
                 .queryForObject("SELECT id::text FROM clinlims.system_role WHERE name = 'Validation'", String.class);
         jdbcTemplate.update(

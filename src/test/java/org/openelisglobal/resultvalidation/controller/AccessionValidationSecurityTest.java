@@ -110,7 +110,7 @@ public class AccessionValidationSecurityTest extends SecuritySliceMockMvcTest {
      * upstream seeds grant it the Pathologist role (2.8 update_default_setting.xml)
      * and Validation across AllLabUnits (2.7 add_admin_default_roles.xml), so the
      * REAL default admin passes both this gate and the release gate; restricting
-     * that account is provisioning-runbook territory (follow-up filed) — the
+     * that account is provisioning-runbook territory (tracked as LIS-249) — the
      * code-level contract pinned here is only that ADMIN grants nothing by itself.
      */
     @Test

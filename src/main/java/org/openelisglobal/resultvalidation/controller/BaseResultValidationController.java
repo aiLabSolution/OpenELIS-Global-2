@@ -58,10 +58,23 @@ public abstract class BaseResultValidationController extends BaseController {
      * work.
      *
      * <p>
+     * The lab-unit scope is read straight from the {@code user_lab_unit_roles}
+     * grants keyed by system-user id ({@link UserService#getUserLabUnitRoles}), so
+     * it resolves identically for form/session, Basic, SAML and OAuth logins —
+     * unlike the queue's {@code getUserTestSections}, which branches on the
+     * principal type. There is no auth-method-specific release-scope path to
+     * diverge.
+     *
+     * <p>
      * Throws {@link AccessDeniedException}: it reaches Spring Security's
      * ExceptionTranslationFilter (ControllerSetup rethrows it past the generic
-     * RuntimeException advice), which answers 403 and records the denial through
-     * AuditingAccessDeniedHandler (LIS-5).
+     * RuntimeException advice), which answers 403. On the default (form/session)
+     * filter chain — where pathologists actually work through the React app — that
+     * chain's {@code AuditingAccessDeniedHandler} records the denial (LIS-5). NOTE:
+     * the Basic/SAML/OAuth/cert chains do not yet register that handler, so a
+     * release denial on a direct Basic-auth API call is a correct 403 but is not
+     * audited; wiring the handler onto every chain is a pre-existing LIS-5 gap
+     * tracked as LIS-250 (it is not introduced by this release gate).
      */
     protected void requireReleaseAuthority(Analysis analysis, String sysUserId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
