@@ -263,6 +263,7 @@ public class ServiceRequestProvider implements IResourceProvider {
             final PatientManagementInfo patientInfo = requireNonNull(
                     fhirTransformService.createOePatientManagementInfo(fhirPatient),
                     "Failed to create PatientManagementInfo");
+            patientInfo.setPatientPK(patientId);
 
             final Errors patientErrors = new BindException(patientInfo, "patientInfo");
             ValidatePatientInfo.validatePatientInfo(patientErrors, patientInfo);

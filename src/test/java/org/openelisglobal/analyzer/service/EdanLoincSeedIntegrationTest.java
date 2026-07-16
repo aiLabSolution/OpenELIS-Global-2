@@ -21,7 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  * H60S) CBC+DIFF code -> LOINC seed (Liquibase changesets
  * {@code 052-edan-cbc-diff-loinc-seed.xml}, {@code 053-edan-h60s-seed.xml},
  * {@code 055-edan-pdw-loinc-seed.xml} and
- * {@code 056-edan-h60s-full-panel-seed.xml}) against the migrated schema — the
+ * {@code 058-edan-h60s-full-panel-seed.xml}) against the migrated schema — the
  * EDAN analogue of {@link Sd1LoincSeedIntegrationTest}.
  *
  * <p>
@@ -52,7 +52,7 @@ public class EdanLoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
 
     /**
      * Full EDAN H90-series wire code (OBX-4) -> target LOINC, exactly the panel
-     * that {@code 056-edan-h60s-full-panel-seed.xml} maps onto the EDAN H60S (= the
+     * that {@code 058-edan-h60s-full-panel-seed.xml} maps onto the EDAN H60S (= the
      * H99S panel of 052 cs3 + PDW of 055). Both RDW-CV/RDW_CV and RDW-SD/RDW_SD
      * separator spellings are present, matching the seed.
      */
@@ -110,7 +110,7 @@ public class EdanLoincSeedIntegrationTest extends BaseWebContextSensitiveTest {
         assertExecutedCount("lis183-%", 3, "052-edan-cbc-diff-loinc-seed.xml (H99S analyzer + tests + 30-code map)");
         assertExecutedCount("lis187-%", 2, "053-edan-h60s-seed.xml (H60S analyzer + CBC-6 map)");
         assertExecutedCount("lis192-%", 2, "055-edan-pdw-loinc-seed.xml (PDW test + H99S map)");
-        assertExecutedCount("lis111-%", 1, "056-edan-h60s-full-panel-seed.xml (H60S full-panel map)");
+        assertExecutedCount("lis111-%", 1, "058-edan-h60s-full-panel-seed.xml (H60S full-panel map)");
     }
 
     private void assertExecutedCount(String idLike, int expected, String what) throws SQLException {

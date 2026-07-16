@@ -72,7 +72,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{github.repository}}
+          token: ${{ secrets.AILAB_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
+          persist-credentials: false
 
       - name: check formatting
         run: mvn spotless:check

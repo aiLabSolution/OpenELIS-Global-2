@@ -319,6 +319,8 @@ jobs:
       checkpoint_context: ${{ needs.setup.outputs.checkpoint_context }}
       test_user: ${{ vars.TEST_USER || 'admin' }}
       test_pass: ${{ vars.TEST_PASS || 'adminADMIN!' }}
+    secrets:
+      AILAB_SUBMODULE_TOKEN: ${{ secrets.AILAB_SUBMODULE_TOKEN }}
 
   # ─── Build Failed Path ────────────────────────────────────────────────────
   missing-image-transfer:

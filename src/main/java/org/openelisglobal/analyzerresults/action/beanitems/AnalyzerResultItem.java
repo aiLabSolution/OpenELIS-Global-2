@@ -31,6 +31,11 @@ public class AnalyzerResultItem implements Serializable {
     private String analysisId;
     private String units;
     private String testName;
+    private String rawCode;
+    private String rawUnit;
+    private String loinc;
+    private String ucumValue;
+    private String normalizationStatus;
 
     // TODO move all accession number to the same format so they can be validated
     // properly
@@ -64,6 +69,17 @@ public class AnalyzerResultItem implements Serializable {
 
     @ValidDate(groups = { AnalyzerResultsForm.AnalyzerResuts.class })
     private String completeDate;
+
+    // Transient: the staging row's true completeDate, used by the LIS-128
+    // cross-day linked-correction guard.
+    // AnalyzerResultsAcceptServiceImpl.hydrateStagingFlags overwrites this
+    // UNCONDITIONALLY from the DB before any read — that overwrite is the
+    // tamper defense and must stay unconditional: the REST accept path binds
+    // posted JSON via Jackson (@RequestBody), which ignores the controller's
+    // setAllowedFields, so a posted value CAN land here. Keeping this field
+    // out of AnalyzerResultsController's ALLOWED_FIELDS protects only the
+    // legacy form path; never rely on that alone.
+    private Timestamp stagingCompleteDate;
 
     private boolean isPositive = false;
     private String duplicateAnalyzerResultId;
@@ -163,6 +179,46 @@ public class AnalyzerResultItem implements Serializable {
         return units;
     }
 
+    public String getRawCode() {
+        return rawCode;
+    }
+
+    public void setRawCode(String rawCode) {
+        this.rawCode = rawCode;
+    }
+
+    public String getRawUnit() {
+        return rawUnit;
+    }
+
+    public void setRawUnit(String rawUnit) {
+        this.rawUnit = rawUnit;
+    }
+
+    public String getLoinc() {
+        return loinc;
+    }
+
+    public void setLoinc(String loinc) {
+        this.loinc = loinc;
+    }
+
+    public String getUcumValue() {
+        return ucumValue;
+    }
+
+    public void setUcumValue(String ucumValue) {
+        this.ucumValue = ucumValue;
+    }
+
+    public String getNormalizationStatus() {
+        return normalizationStatus;
+    }
+
+    public void setNormalizationStatus(String normalizationStatus) {
+        this.normalizationStatus = normalizationStatus;
+    }
+
     public void setAccessionNumber(String accessionNumber) {
         this.accessionNumber = accessionNumber;
     }
@@ -249,6 +305,14 @@ public class AnalyzerResultItem implements Serializable {
 
     public String getCompleteDate() {
         return completeDate;
+    }
+
+    public void setStagingCompleteDate(Timestamp stagingCompleteDate) {
+        this.stagingCompleteDate = stagingCompleteDate;
+    }
+
+    public Timestamp getStagingCompleteDate() {
+        return stagingCompleteDate;
     }
 
     public void setPositive(boolean isPositive) {

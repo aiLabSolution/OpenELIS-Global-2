@@ -169,7 +169,10 @@
   <!-- LIS-192 (follows LIS-183): EDAN H99S PDW analyte LOINC seed — resolves the 052-deferred PDW to 32207-3 (fL) + maps wire code PDW under the existing EDAN H99S analyzer -->
   <include relativeToChangelogFile="true" file="055-edan-pdw-loinc-seed.xml"/>
 
-  <!-- LIS-111 (follows LIS-187/053): sync the EDAN H60S map to the full H99S panel (30 CBC+DIFF codes of 052 + PDW of 055); the pilot H60S emits the same panel as the H99S -->
-  <include relativeToChangelogFile="true" file="056-edan-h60s-full-panel-seed.xml"/>
+  <!-- LIS-133: preserve raw analyzer code/unit beside LOINC/UCUM provenance while results are staged -->
+  <include relativeToChangelogFile="true" file="056-analyzer-results-normalization-provenance.xml"/>
+
+  <!-- LIS-111 (follows LIS-187/053): sync the EDAN H60S map to the full H99S panel (30 CBC+DIFF codes of 052 + PDW of 055); the pilot H60S emits the same panel as the H99S. Renumbered 056->058 on merge with main: #40 (LIS-133) took 056 and open PR #39 (LIS-54) claims 057. -->
+  <include relativeToChangelogFile="true" file="058-edan-h60s-full-panel-seed.xml"/>
 
 </databaseChangeLog>

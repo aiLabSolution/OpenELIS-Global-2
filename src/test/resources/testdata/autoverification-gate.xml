@@ -1,0 +1,121 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<dataset>
+    <!-- LIS-55 autoverification gate component fixtures. All ids live in the
+        78xx range (accessions AVGT*) to stay clear of sibling fixtures — BaseWebContextSensitiveTest
+        runs without a wrapping transaction, so accepted samples/analyses commit
+        for real. QC shapes mirror qc-alert-flow.xml; test/analyzer/staging shapes
+        mirror analyzer-results-correction.xml. -->
+
+    <localization id="7811" description="Test Name"
+        lastupdated="2026-07-15 08:00:00" />
+
+    <system_user id="1" login_name="testUser" last_name="Doe"
+        first_name="John" is_active="Y" is_employee="Y"
+        lastupdated="2026-07-15 08:00:00" />
+
+    <analyzer id="7801" name="AVG Analyzer" machine_id="AVG-001"
+        analyzer_type="CHEMISTRY"
+        description="Autoverification gate component-test analyzer"
+        location="Test Lab" is_active="true" has_setup_page="false"
+        last_updated="2026-07-15 08:00:00" />
+
+    <test id="7810" description="Potassium AVG" loinc="2823-3"
+        reporting_description="Potassium AVG" sticker_req_flag="Y"
+        is_active="Y" active_begin="2025-01-01 12:00:00"
+        active_end="2027-12-31 12:00:00" is_reportable="Y" time_holding="30"
+        time_wait="15" time_ta_average="60" time_ta_warning="90"
+        time_ta_max="120" label_qty="1" lastupdated="2026-07-15 08:00:00"
+        local_code="KAVG" sort_order="2147483640" name="Potassium AVG"
+        orderable="true" guid="avg-7810-guid" name_localization_id="7811" />
+
+    <!-- accept path derives the sample type from sampletype_test for the accepted
+        test (getTypeOfSampleId -> sampleTests.get(0)) -->
+    <type_of_sample id="7815" description="Serum AVG"
+        domain="H" name_localization_id="7811"
+        lastupdated="2026-07-15 08:00:00" />
+
+    <sampletype_test id="7816" sample_type_id="7815"
+        test_id="7810" display_order="1" />
+
+    <type_of_test_result id="7820"
+        description="Numeric AVG" test_result_type="N" hl7_value="NM"
+        lastupdated="2026-07-15 08:00:00" />
+
+    <!-- NOTE: the result_limits row (test 7810, range 40-60) is inserted by
+        the test via raw SQL, not here — the "no upper age bound" default limit needs
+        max_age = 'Infinity'::float8, which DBUnit's DOUBLE typecast rejects. -->
+
+    <!-- QC: active control lot + established statistics mean=100 SD=5 -->
+    <qc_control_lot id="lot-avg-001"
+        fhir_uuid="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        product_name="AVG Control NORMAL" lot_number="LOT-AVG-001"
+        manufacturer="Test Mfg" control_level="NORMAL" test_id="7810"
+        instrument_id="7801" calculation_method="INITIAL_RUNS"
+        initial_runs_count="20" manufacturer_mean="100.00000"
+        manufacturer_std_dev="5.00000" activation_date="2025-01-01 00:00:00"
+        expiration_date="2027-12-31 00:00:00" status="ACTIVE" sys_user_id="1"
+        last_updated="2026-07-15 08:00:00" />
+
+    <qc_statistics id="stats-avg-001"
+        control_lot_id="lot-avg-001" calculation_date="2026-07-01 10:00:00"
+        mean="100.00000" standard_deviation="5.00000" num_values="20"
+        calculation_method="INITIAL_RUNS" validity_start="2026-07-01 10:00:00"
+        sys_user_id="1" last_updated="2026-07-01 10:00:00" />
+
+    <!-- 1₃ₛ REJECTION (out of control), 1₂ₛ WARNING (in control) -->
+    <westgard_rule_config id="rule-avg-13s"
+        test_id="7810" instrument_id="7801" rule_code="1₃ₛ" enabled="true"
+        severity="REJECTION" requires_corrective_action="true" sys_user_id="1"
+        last_updated="2026-07-15 08:00:00" />
+
+    <westgard_rule_config id="rule-avg-12s"
+        test_id="7810" instrument_id="7801" rule_code="1₂ₛ" enabled="true"
+        severity="WARNING" requires_corrective_action="false" sys_user_id="1"
+        last_updated="2026-07-15 08:00:00" />
+
+    <!-- staged analyzer results, one accession per scenario -->
+    <analyzer_results id="7851" analyzer_id="7801"
+        accession_number="AVGT100" test_name="Potassium AVG" result="50"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+
+    <analyzer_results id="7852" analyzer_id="7801"
+        accession_number="AVGT200" test_name="Potassium AVG" result="50"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+
+    <analyzer_results id="7853" analyzer_id="7801"
+        accession_number="AVGT201" test_name="Potassium AVG" result="75"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+
+    <analyzer_results id="7854" analyzer_id="7801"
+        accession_number="AVGT202" test_name="Potassium AVG" result="51"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+
+    <analyzer_results id="7855" analyzer_id="7801"
+        accession_number="AVGT300" test_name="Potassium AVG" result="50"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+
+    <analyzer_results id="7856" analyzer_id="7801"
+        accession_number="AVGT400" test_name="Potassium AVG" result="50"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+
+    <!-- AVGT500: accepted against a PRE-EXISTING ordered sample+analysis (the
+        pilot's primary workflow); the sample/analysis rows are seeded via SQL in
+        the test because their status_id FKs use the ensured status rows -->
+    <analyzer_results id="7857" analyzer_id="7801"
+        accession_number="AVGT500" test_name="Potassium AVG" result="50"
+        units="mmol/L" iscontrol="false" last_updated="2026-07-15 08:30:00"
+        read_only="false" positive="false" complete_date="2026-07-15 08:30:00"
+        test_result_type="N" test_id="7810" />
+</dataset>

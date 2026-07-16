@@ -144,4 +144,20 @@ public class QCResultDAOImpl extends BaseDAOImpl<QCResult, String> implements QC
             throw new LIMSRuntimeException("Error retrieving distinct instrument IDs from QC results", e);
         }
     }
+
+    @Override
+    public List<QCResult> findPendingByInstrumentAndTest(String instrumentId, String testId)
+            throws LIMSRuntimeException {
+        try {
+            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+            CriteriaQuery<QCResult> cq = cb.createQuery(QCResult.class);
+            Root<QCResult> root = cq.from(QCResult.class);
+            cq.where(cb.equal(root.get("instrumentId"), instrumentId), cb.equal(root.get("testId"), testId),
+                    cb.equal(root.get("resultStatus"), "PENDING"));
+            cq.orderBy(cb.desc(root.get("runDateTime")));
+            return entityManager.createQuery(cq).getResultList();
+        } catch (RuntimeException e) {
+            throw new LIMSRuntimeException("Error retrieving pending QC results by instrument and test", e);
+        }
+    }
 }
