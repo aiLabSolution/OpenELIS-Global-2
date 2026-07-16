@@ -5,6 +5,11 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -13,19 +18,28 @@ import java.util.List;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.openelisglobal.BaseWebContextSensitiveTest;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
 import org.openelisglobal.analyzerresults.action.beanitems.AnalyzerResultItem;
 import org.openelisglobal.analyzerresults.service.AnalyzerResultsAcceptServiceImpl;
+import org.openelisglobal.analyzerresults.valueholder.SampleGrouping;
 import org.openelisglobal.common.services.IStatusService;
 import org.openelisglobal.common.services.StatusService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
+import org.openelisglobal.common.services.StatusService.OrderStatus;
+import org.openelisglobal.dataexchange.fhir.service.FhirTransformService;
+import org.openelisglobal.notification.service.TestNotificationService;
+import org.openelisglobal.notification.valueholder.NotificationConfigOption.NotificationNature;
 import org.openelisglobal.qc.dao.QCResultDAO;
 import org.openelisglobal.qc.service.QCResultService;
 import org.openelisglobal.qc.service.QCRuleViolationService;
 import org.openelisglobal.qc.valueholder.QCResult;
 import org.openelisglobal.qc.valueholder.QCRuleViolation;
+import org.openelisglobal.result.valueholder.Result;
+import org.openelisglobal.resultvalidation.util.ResultsValidationUtility;
 import org.openelisglobal.sample.service.SampleService;
 import org.openelisglobal.sample.valueholder.Sample;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -94,8 +108,20 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
     @Autowired
     private IStatusService statusService;
 
+    /** the AppTestConfig-wide Mockito mock — release notifications land here */
+    @Autowired
+    private TestNotificationService testNotificationService;
+
+    /**
+     * the human validation queue's exact lookup (AccessionValidationRestController)
+     */
+    @Autowired
+    private ResultsValidationUtility resultsValidationUtility;
+
     private AutoverificationGateServiceImpl gateTarget;
     private DeltaCheckService originalDeltaCheckService;
+    private FhirTransformService originalFhirTransformService;
+    private FhirTransformService fhirTransformMock;
 
     @Before
     public void setUpGate() throws Exception {
@@ -114,6 +140,8 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         ensureStatusRow("7904", "794", "Technical Rejected", "ANALYSIS");
         ensureStatusRow("7905", "795", "Finalized", "ANALYSIS");
         ensureStatusRow("7906", "796", "Not Tested", "ANALYSIS");
+        // the LIS-226 completion roll-up writes OrderStatus.Finished
+        ensureStatusRow("7907", "797", "Testing finished", "ORDER");
         ensureRecordStatusReferenceRows();
         statusService.refreshCache();
 
@@ -128,6 +156,18 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         gateTarget = AopTestUtils.getUltimateTargetObject(gateService);
         originalDeltaCheckService = (DeltaCheckService) ReflectionTestUtils.getField(gateTarget, "deltaCheckService");
         ReflectionTestUtils.setField(gateTarget, "enabled", true);
+
+        // Observe the FHIR export at the exact seam the human controller uses
+        // (the transform internals have their own validation tests); the real
+        // context bean runs against mocked FhirUtil/FhirContext and would just
+        // die silently inside its @Async executor.
+        originalFhirTransformService = (FhirTransformService) ReflectionTestUtils.getField(gateTarget,
+                "fhirTransformService");
+        fhirTransformMock = mock(FhirTransformService.class);
+        ReflectionTestUtils.setField(gateTarget, "fhirTransformService", fhirTransformMock);
+
+        // context-singleton mock — drop interactions recorded by other tests
+        Mockito.reset(testNotificationService);
     }
 
     @After
@@ -137,6 +177,9 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         if (gateTarget != null) {
             ReflectionTestUtils.setField(gateTarget, "enabled", false);
             ReflectionTestUtils.setField(gateTarget, "deltaCheckService", originalDeltaCheckService);
+            if (originalFhirTransformService != null) {
+                ReflectionTestUtils.setField(gateTarget, "fhirTransformService", originalFhirTransformService);
+            }
         }
         jdbcTemplate.update("DELETE FROM clinlims.result_limits WHERE id = 7830");
 
@@ -242,9 +285,9 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         item.setIsControl(false);
         item.setTestResultType("N");
         item.setAnalyzerId(ANALYZER_ID);
-        // These synthetic accessions intentionally have no pre-existing order.
-        // LIS-126 requires the technician's explicit confirmation before such
-        // analyzer results may be committed under the unidentified patient.
+        // LIS-126 fail-closed unmatched gate: accessions without a matching
+        // order (all but AVGT500 here) need the UI's confirmed
+        // accept-as-unknown decision or the whole accept throws
         item.setUnmatchedAction("ACCEPT_UNKNOWN");
         // Analysis.setCompletedDateForDisplay parses the configured display
         // format: the test DB seeds default date locale fr-FR, whose
@@ -428,5 +471,129 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
                 analysis.getStatusId());
         assertNull(analysis.getReleasedDate());
         assertTrue("no autoverification note of any kind may exist", gateNotes(analysis).isEmpty());
+    }
+
+    // ---------------------------------------------------------------
+    // LIS-226 — release side effects (FHIR export, notification, sample
+    // completion), driven through the real accept path
+    // ---------------------------------------------------------------
+
+    /**
+     * AC2: an auto-finalized analysis produces the FHIR result export and the
+     * parent sample rolls to Finished when it is the last open analysis.
+     */
+    @Test
+    public void autoFinalizedLastOpenAnalysis_exportsFhirAndRollsSampleToFinished() throws Exception {
+        runQC("102.0", "ACCEPTED");
+
+        accept(item("7852", "AVGT200", "50", 1));
+
+        assertAutoFinalized("AVGT200");
+        Analysis analysis = findSingleAnalysis("AVGT200");
+
+        Sample sample = sampleService.getSampleByAccessionNumber("AVGT200");
+        assertEquals("last open analysis released -> parent sample must roll to Finished",
+                statusService.getStatusID(OrderStatus.Finished), sample.getStatusId());
+
+        // FHIR export left through the human validation path's seam, with the
+        // released analysis (DiagnosticReport leg), its result (Observation
+        // leg) and the finished sample (Task/ServiceRequest leg) aboard
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Analysis>> exportedAnalyses = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Result>> exportedResults = ArgumentCaptor.forClass(ArrayList.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Sample>> exportedSamples = ArgumentCaptor.forClass(ArrayList.class);
+        verify(fhirTransformMock).transformPersistResultValidationFhirObjects(any(), exportedAnalyses.capture(),
+                exportedResults.capture(), any(), exportedSamples.capture(), any());
+        assertEquals(1, exportedAnalyses.getValue().size());
+        assertEquals(analysis.getId(), exportedAnalyses.getValue().get(0).getId());
+        assertEquals("exported analysis must carry the Finalized status", finalizedId(),
+                exportedAnalyses.getValue().get(0).getStatusId());
+        assertEquals(1, exportedResults.getValue().size());
+        assertEquals(1, exportedSamples.getValue().size());
+        assertEquals(sample.getId(), exportedSamples.getValue().get(0).getId());
+
+        // and the RESULT_VALIDATION notification fired for the released result
+        ArgumentCaptor<Result> notifiedResult = ArgumentCaptor.forClass(Result.class);
+        verify(testNotificationService).createAndSendNotificationsToConfiguredSources(
+                eq(NotificationNature.RESULT_VALIDATION), notifiedResult.capture());
+        assertEquals(analysis.getId(), notifiedResult.getValue().getAnalysis().getId());
+    }
+
+    /**
+     * The roll-up refuses while a sibling analysis on the sample is still open: the
+     * release itself (and its export) must still happen.
+     */
+    @Test
+    public void openSiblingAnalysis_blocksSampleCompletion_butReleaseStillExports() throws Exception {
+        seedOrderedSample();
+        seedOpenSiblingAnalysis();
+        runQC("102.0", "ACCEPTED");
+
+        accept(item("7857", "AVGT500", "50", 1));
+
+        Sample sample = sampleService.getSampleByAccessionNumber("AVGT500");
+        List<Analysis> analyses = analysisService.getAnalysesBySampleId(sample.getId());
+        assertEquals("ordered analysis + open sibling expected", 2, analyses.size());
+        Analysis released = analyses.stream().filter(a -> "7810".equals(a.getTest().getId())).findFirst().orElseThrow();
+        assertEquals("the accepted analysis must auto-finalize", finalizedId(), released.getStatusId());
+
+        assertTrue("sample with an open sibling analysis must NOT roll to Finished",
+                !statusService.getStatusID(OrderStatus.Finished).equals(sample.getStatusId()));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ArrayList<Sample>> exportedSamples = ArgumentCaptor.forClass(ArrayList.class);
+        verify(fhirTransformMock).transformPersistResultValidationFhirObjects(any(), any(), any(), any(),
+                exportedSamples.capture(), any());
+        assertTrue("unfinished sample must not ride the export", exportedSamples.getValue().isEmpty());
+    }
+
+    /**
+     * AC3 (replay leg): a released analysis is no longer at TechnicalAcceptance, so
+     * a repeated gate pass over the same grouping — the double-fire vector on our
+     * side — must produce no second export, notification or note. (The human path
+     * cannot double-fire either: the validation queue selects TechnicalAcceptance
+     * analyses only, and this one is Finalized.)
+     */
+    @Test
+    public void replayedGatePass_isIdempotent_noSecondExportNotificationOrNote() throws Exception {
+        runQC("102.0", "ACCEPTED");
+        accept(item("7852", "AVGT200", "50", 1));
+        Analysis analysis = findSingleAnalysis("AVGT200");
+        assertEquals(finalizedId(), analysis.getStatusId());
+
+        Mockito.reset(fhirTransformMock, testNotificationService);
+
+        SampleGrouping replay = new SampleGrouping();
+        replay.analysisList = new ArrayList<>(List.of(analysis));
+        replay.resultList = new ArrayList<>(List.of(new Result()));
+        gateService.evaluateAndFinalize(List.of(replay), TEST_SYS_USER_ID);
+
+        assertEquals("replay must not add a second gate note", 1, gateNotes(analysis).size());
+        verify(fhirTransformMock, never()).transformPersistResultValidationFhirObjects(any(), any(), any(), any(),
+                any(), any());
+        verify(testNotificationService, never()).createAndSendNotificationsToConfiguredSources(any(), any());
+
+        // and the human validation queue — the controller's exact lookup, both
+        // queue statuses — no longer offers the analysis, so a human touching
+        // the accession later cannot re-validate (and thereby re-export or
+        // re-notify) it
+        assertTrue("auto-finalized analysis must be gone from the human validation queue",
+                resultsValidationUtility.getResultValidationList(
+                        List.of(technicalAcceptanceId(), statusService.getStatusID(AnalysisStatus.TechnicalRejected)),
+                        null, "AVGT200", null).isEmpty());
+    }
+
+    /**
+     * A NotStarted sibling on the ordered sample's item, test 7812 — never sent by
+     * the analyzer, so it stays open through the accept.
+     */
+    private void seedOpenSiblingAnalysis() {
+        String notStartedId = statusService.getStatusID(AnalysisStatus.NotStarted);
+        jdbcTemplate.update(
+                "INSERT INTO clinlims.analysis (id, sampitem_id, test_id, status_id, analysis_type,"
+                        + " revision, lastupdated) VALUES (7866, 7864, 7812, ?::numeric, 'MANUAL', '1', now())",
+                notStartedId);
     }
 }
