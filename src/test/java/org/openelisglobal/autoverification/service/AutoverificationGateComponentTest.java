@@ -119,6 +119,7 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         ensureStatusRow("7904", "794", "Technical Rejected", "ANALYSIS");
         ensureStatusRow("7905", "795", "Finalized", "ANALYSIS");
         ensureStatusRow("7906", "796", "Not Tested", "ANALYSIS");
+        ensureRecordStatusReferenceRows();
         statusService.refreshCache();
 
         // default limit (no gender, age 0..Infinity) so the accept path's
@@ -255,6 +256,24 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
                         + " SELECT ?::numeric, ?::numeric, ?, ?, ?, now() WHERE NOT EXISTS"
                         + " (SELECT 1 FROM clinlims.status_of_sample WHERE name = ? AND status_type = ?)",
                 id, code, name, name, statusType, name, statusType);
+    }
+
+    private void ensureRecordStatusReferenceRows() {
+        jdbcTemplate.update("INSERT INTO clinlims.observation_history_type (id, type_name, description, lastupdated)"
+                + " SELECT 7971, 'SampleRecordStatus', 'Sample record status', now() WHERE NOT EXISTS"
+                + " (SELECT 1 FROM clinlims.observation_history_type WHERE type_name = 'SampleRecordStatus')");
+        jdbcTemplate.update("INSERT INTO clinlims.observation_history_type (id, type_name, description, lastupdated)"
+                + " SELECT 7972, 'PatientRecordStatus', 'Patient record status', now() WHERE NOT EXISTS"
+                + " (SELECT 1 FROM clinlims.observation_history_type WHERE type_name = 'PatientRecordStatus')");
+        jdbcTemplate
+                .update("INSERT INTO clinlims.dictionary_category (id, description, local_abbrev, name, lastupdated)"
+                        + " SELECT 7973, 'Record status', 'RECST', 'REC_STATUS', now() WHERE NOT EXISTS"
+                        + " (SELECT 1 FROM clinlims.dictionary_category WHERE name = 'REC_STATUS')");
+        jdbcTemplate.update("INSERT INTO clinlims.dictionary"
+                + " (id, is_active, dict_entry, local_abbrev, dictionary_category_id, sort_order, lastupdated)"
+                + " SELECT 7974, 'Y', 'Not Registered', 'Not Start', category.id, 1, now()"
+                + " FROM clinlims.dictionary_category category WHERE category.name = 'REC_STATUS'"
+                + " AND NOT EXISTS (SELECT 1 FROM clinlims.dictionary WHERE local_abbrev = 'Not Start')");
     }
 
     // ---------------------------------------------------------------
