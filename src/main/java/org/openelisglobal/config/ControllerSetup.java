@@ -20,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -44,6 +45,20 @@ public class ControllerSetup extends ResponseEntityExceptionHandler {
         binder.registerCustomEditor(AuthType.class, new CaseInsensitiveEnumPropertyEditor<>(AuthType.class));
         binder.registerCustomEditor(ProgrammedConnection.class,
                 new CaseInsensitiveEnumPropertyEditor<>(ProgrammedConnection.class));
+    }
+
+    /**
+     * Security denials must NOT be swallowed by the generic RuntimeException
+     * handler below (which would turn them into 500s): rethrowing lets the
+     * exception reach Spring Security's ExceptionTranslationFilter, which answers
+     * 403 and routes through AuditingAccessDeniedHandler so the denial is recorded
+     * in the audit log (the LIS-5 contract). This applies both to method-security
+     * ({@code @PreAuthorize}) denials and to authorization checks performed inside
+     * controller bodies (LIS-56 release authority).
+     */
+    @ExceptionHandler(value = { AccessDeniedException.class })
+    protected void handleAccessDenied(AccessDeniedException ex) {
+        throw ex;
     }
 
     @ExceptionHandler(value = { RuntimeException.class })

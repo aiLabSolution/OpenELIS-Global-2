@@ -15,4 +15,31 @@ public interface ResultValidationService {
     void persistdata(List<Result> deletableList, List<Analysis> analysisUpdateList, ArrayList<Result> resultUpdateList,
             List<AnalysisItem> resultItemList, ArrayList<Sample> sampleUpdateList, ArrayList<Note> noteUpdateList,
             IResultSaveService resultSaveService, List<IResultUpdate> updaters, String sysUserId);
+
+    /**
+     * The release transition of the human result-validation path: stamps the named
+     * releasing user as the audit attribution, moves the analysis to Finalized and
+     * records the release moment. Fail-closed: refuses (throws) unless the analysis
+     * is currently in a held validation-queue status (Technical Acceptance, or
+     * Technical Rejection when VALIDATE_REJECTED_TESTS is on) — the caller must
+     * hand in the database-loaded analysis, never a client-built one. Mutates in
+     * place; persisting the analysis afterwards through
+     * {@code AnalysisService#update} (persistdata's analysis leg) writes the
+     * before/after transition to the append-only history table — that row is the
+     * release audit record (LIS-56).
+     */
+    void markAnalysisReleased(Analysis analysis, String sysUserId);
+
+    /**
+     * The reject (send-back-to-bench) transition of the human result-validation
+     * path: moves a held analysis to BiologistRejected under the named user.
+     * Fail-closed and symmetric to {@link #markAnalysisReleased}: refuses (throws)
+     * unless the analysis is currently in a held validation-queue status. This
+     * blocks a stale/concurrent reject from retracting an analysis another user has
+     * already released (Finalized) — which would otherwise leave a rejected
+     * analysis carrying a release timestamp and could overwrite finalized clinical
+     * output. The caller must hand in the database-loaded analysis, never a
+     * client-built one. Mutates in place (LIS-56).
+     */
+    void markAnalysisRejected(Analysis analysis, String sysUserId);
 }
