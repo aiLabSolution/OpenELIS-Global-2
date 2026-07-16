@@ -77,6 +77,7 @@ import org.openelisglobal.testresult.service.TestResultService;
 import org.openelisglobal.testresult.valueholder.TestResult;
 import org.openelisglobal.typeoftestresult.service.TypeOfTestResultServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -103,6 +104,14 @@ public class FhirReferralServiceImpl implements FhirReferralService {
     private ReferralSetService referralSetService;
     @Autowired
     private AnalysisService analysisService;
+    // @Lazy breaks the fhirTransformServiceImpl -> referralSetServiceImpl ->
+    // fhirReferralServiceImpl -> fhirTransformServiceImpl circular reference.
+    // fhirTransformServiceImpl is @Async-proxied after creation, so any eager
+    // path that re-enters it mid-creation exposes the raw bean and aborts
+    // startup ("injected in its raw version ... eventually wrapped"). Without
+    // @Lazy here, boot survives only while bean creation order happens to enter
+    // the cycle at this bean. Guarded by EagerAsyncInjectionCycleTest.
+    @Lazy
     @Autowired
     private FhirTransformService fhirTransformService;
     @Autowired
