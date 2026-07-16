@@ -188,6 +188,12 @@ public class PathologistReleaseComponentTest extends BaseWebContextSensitiveTest
         ensureStatusRow("8292", "822", "Finalized", "ANALYSIS");
         ensureStatusRow("8293", "823", "Testing Started", "ORDER");
         ensureStatusRow("8294", "824", "SampleEntered", "SAMPLE");
+        // OrderStatus.Finished (name "Testing finished") — the endpoint release's
+        // sample-completion roll-up (persistdata.checkIfSamplesFinished) writes it
+        // once every analysis on the sample is terminal; without it the roll-up
+        // resolves to "-1" and violates sample_status_fk. (The service-seam tests
+        // dodge this by passing an empty resultItemList, so they never roll up.)
+        ensureStatusRow("8295", "825", "Testing finished", "ORDER");
         statusService.refreshCache();
 
         analysisRefTableId = referenceTablesService.getReferenceTableByName("ANALYSIS").getId();
