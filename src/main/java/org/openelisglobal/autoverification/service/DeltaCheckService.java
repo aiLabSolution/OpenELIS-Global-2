@@ -9,11 +9,10 @@ import org.openelisglobal.result.valueholder.Result;
  * <p>
  * The real engine — comparing the incoming value against the patient's most
  * recent prior final Result for the same analyte with configurable
- * absolute/relative thresholds — is LIS-54's deliverable. Until it lands, the
- * default {@link NotInstalledDeltaCheckService} answers
- * {@link DeltaCheckVerdict.Outcome#NOT_EVALUABLE}, leaving the delta leg inert.
- * LIS-54's implementation should be annotated {@code @Primary} (or replace the
- * default bean) so the gate picks it up without changes.
+ * absolute/relative thresholds — is {@link DeltaCheckServiceImpl} (LIS-54),
+ * wired {@code @Primary} so the gate picks it up over the inert
+ * {@link NotInstalledDeltaCheckService} default, which always answers
+ * {@link DeltaCheckVerdict.Outcome#NOT_EVALUABLE}.
  */
 public interface DeltaCheckService {
 

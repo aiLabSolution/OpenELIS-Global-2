@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-111 (follows LIS-187/053) — EDAN H60S full-panel map               -->
+    <!--                                                                    -->
+    <!-- 053 seeded the EDAN H60S analyzer with only the CBC-6 map                -->
+    <!-- (WBC/RBC/HGB/HCT/MCV/PLT); its full 3-part differential was left a       -->
+    <!-- deferred follow-up. The pilot H60S emits the SAME panel as the H99S       -->
+    <!-- (owner-confirmed, 2026-07-15), so this changeset syncs the H60S map to    -->
+    <!-- the full H99S panel: the 30 CBC+DIFF codes of 052 (LIS-183) plus PDW      -->
+    <!-- of 055 (LIS-192). It maps the remaining 25 codes; the 6 CBC codes 053     -->
+    <!-- already mapped are skipped by the NOT EXISTS guard (idempotent).          -->
+    <!--                                                                    -->
+    <!-- Only analyzer_test_map rows are seeded here — every target Test/LOINC     -->
+    <!-- already exists: the 13 diff/index analytes + RDW_SD spelling are created  -->
+    <!-- by 052 cs1, PDW by 055 cs1, and the CBC/index catalog codes reuse the     -->
+    <!-- LabSolution hematology catalog (same dependency as 049/052/053). Codes    -->
+    <!-- whose LOINC-bearing Test is absent (bare demo DB) are skipped, never      -->
+    <!-- mapped to a NULL test_id. Both RDW-CV/RDW_CV and RDW-SD/RDW_SD separator  -->
+    <!-- spellings are mapped, matching 052 cs3, so attachTestCodeLoinc emits the  -->
+    <!-- pairs regardless of which spelling the wire uses.                         -->
+    <!--                                                                    -->
+    <!-- Deliberate omissions (unchanged from the H99S panel): P_LCR/P_LCC         -->
+    <!-- (dropped per the LIS-192 disposition matrix) and research-only            -->
+    <!-- ALY/LIC/PLR/NLR (no LOINC; IME != IMG, never normalized).                 -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis111-001-map-edan-h60s-full-panel" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'EDAN H60S'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the full EDAN H60S panel (30 CBC+DIFF codes from 052 + PDW from 055) to the OE Test carrying each LOINC, mirroring the H99S map (052 cs3 + 055 cs2). The EXISTS-test guard keeps the same catalog dependency as 052/053; the NOT EXISTS-map guard makes it idempotent and skips the CBC-6 codes 053 already mapped (LIS-111).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, v.code,
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   now()
+            FROM clinlims.analyzer a
+            CROSS JOIN (VALUES
+                    ('WBC',     '6690-2'),
+                    ('RBC',     '789-8'),
+                    ('HGB',     '718-7'),
+                    ('HCT',     '4544-3'),
+                    ('MCV',     '787-2'),
+                    ('MCH',     '785-6'),
+                    ('MCHC',    '786-4'),
+                    ('PLT',     '777-3'),
+                    ('RDW-CV',  '788-0'),
+                    ('RDW_CV',  '788-0'),
+                    ('MPV',     '32623-1'),
+                    ('NEU#',    '751-8'),
+                    ('NEU%',    '770-8'),
+                    ('LYM#',    '731-0'),
+                    ('LYM%',    '736-9'),
+                    ('MON#',    '742-7'),
+                    ('MON%',    '5905-5'),
+                    ('EOS#',    '711-2'),
+                    ('EOS%',    '713-8'),
+                    ('BAS#',    '704-7'),
+                    ('BAS%',    '706-2'),
+                    ('NRBC#',   '771-6'),
+                    ('NRBC%',   '58413-6'),
+                    ('RDW-SD',  '21000-5'),
+                    ('RDW_SD',  '21000-5'),
+                    ('PCT',     '51637-7'),
+                    ('IMG#',    '53115-2'),
+                    ('IMG%',    '38518-7'),
+                    ('RET#',    '60474-4'),
+                    ('RET%',    '17849-1'),
+                    ('PDW',     '32207-3')
+                 ) AS v(code, loinc)
+            WHERE a.name = 'EDAN H60S'
+              AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+              AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_test_map m
+                    WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
+        </sql>
+        <rollback>
+            <!-- Delete ONLY the codes this changeset adds to EDAN H60S — the full panel
+                 MINUS the CBC-6 that 053 owns (WBC/RBC/HGB/HCT/MCV/PLT). Removing 053's
+                 rows here would delete config this changeset did not create; mirrors the
+                 catalog-code exclusion in 052 cs3's rollback. Re-apply is idempotent
+                 (NOT EXISTS guard), so this is the safe direction. -->
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                    WHERE analyzer_test_name IN (
+                        'MCH', 'MCHC', 'RDW-CV', 'RDW_CV', 'MPV', 'NEU#', 'NEU%',
+                        'LYM#', 'LYM%', 'MON#', 'MON%', 'EOS#', 'EOS%', 'BAS#', 'BAS%',
+                        'NRBC#', 'NRBC%', 'RDW-SD', 'RDW_SD', 'PCT', 'IMG#', 'IMG%',
+                        'RET#', 'RET%', 'PDW')
+                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'EDAN H60S');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
