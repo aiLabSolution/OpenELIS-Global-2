@@ -6,6 +6,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import javax.sql.DataSource;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
@@ -14,6 +16,7 @@ import org.openelisglobal.patient.valueholder.Patient;
 import org.openelisglobal.person.service.PersonService;
 import org.openelisglobal.person.valueholder.Person;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Integration tests for redirect-on-lookup pattern (interim solution for
@@ -31,6 +34,11 @@ public class PatientDAORedirectIntegrationTest extends BaseWebContextSensitiveTe
     @Autowired
     private PersonService personService;
 
+    @Autowired
+    private DataSource dataSource;
+
+    private JdbcTemplate jdbcTemplate;
+
     private Patient primaryPatient;
     private Patient mergedPatient;
     private Person primaryPerson;
@@ -39,6 +47,24 @@ public class PatientDAORedirectIntegrationTest extends BaseWebContextSensitiveTe
     @Before
     public void setUp() throws Exception {
         ensureReferenceTables("PERSON", "PATIENT");
+        // person_seq/patient_seq are standalone sequences not owned by the id
+        // columns, so TRUNCATE ... RESTART IDENTITY never resets them and the
+        // explicit-id fixtures other tests commit (base class is
+        // @Transactional(NOT_SUPPORTED)) don't advance them. Resync before
+        // inserting so a Hibernate-generated id can't collide with a prior
+        // fixture's committed explicit-id row (order-dependent PK collision).
+        jdbcTemplate = new JdbcTemplate(dataSource);
+        // id columns are numeric, but setval's 2nd arg is bigint — cast the MAX
+        // to BIGINT (as fix_sequences.xml does) or setval(regclass, numeric, bool)
+        // fails to resolve. is_called=false so nextval returns MAX+1 (first free).
+        jdbcTemplate.queryForObject(
+                "SELECT setval('clinlims.person_seq',"
+                        + " CAST((SELECT COALESCE(MAX(id), 0) FROM clinlims.person) AS BIGINT) + 1, false)",
+                Long.class);
+        jdbcTemplate.queryForObject(
+                "SELECT setval('clinlims.patient_seq',"
+                        + " CAST((SELECT COALESCE(MAX(id), 0) FROM clinlims.patient) AS BIGINT) + 1, false)",
+                Long.class);
         // Create persons for test patients
         primaryPerson = new Person();
         primaryPerson.setFirstName("John");
@@ -72,6 +98,24 @@ public class PatientDAORedirectIntegrationTest extends BaseWebContextSensitiveTe
         mergedPatient.setIsMerged(false);
         String mergedId = patientDAO.insert(mergedPatient);
         mergedPatient.setId(mergedId);
+    }
+
+    @After
+    public void tearDown() {
+        // Base class commits rows (no rollback under @Transactional(NOT_SUPPORTED)),
+        // so remove what this test created to avoid polluting later tests. FK-safe
+        // order: merged patient (self-ref merged_into_patient_id) before primary,
+        // then the persons they reference.
+        deleteById("clinlims.patient", mergedPatient == null ? null : mergedPatient.getId());
+        deleteById("clinlims.patient", primaryPatient == null ? null : primaryPatient.getId());
+        deleteById("clinlims.person", mergedPerson == null ? null : mergedPerson.getId());
+        deleteById("clinlims.person", primaryPerson == null ? null : primaryPerson.getId());
+    }
+
+    private void deleteById(String table, String id) {
+        if (id != null) {
+            jdbcTemplate.update("DELETE FROM " + table + " WHERE id = ?::numeric", id);
+        }
     }
 
     /**

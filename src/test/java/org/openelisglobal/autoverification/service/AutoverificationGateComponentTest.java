@@ -227,6 +227,11 @@ public class AutoverificationGateComponentTest extends BaseWebContextSensitiveTe
         // format: the test DB seeds default date locale fr-FR, whose
         // date.format.formatKey is dd/MM/yyyy
         item.setCompleteDate("15/07/2026");
+        // LIS-126 fail-closed unmatched-sample gate runs before the QC/delta
+        // logic under test; these fixtures use the LIS-55 Unknown-patient
+        // grouping, so mark them ACCEPT_UNKNOWN to clear the gate (mirrors
+        // AnalyzerResultsAcceptUnmatchedGateTest). No effect on matched samples.
+        item.setUnmatchedAction("ACCEPT_UNKNOWN");
         return item;
     }
 
