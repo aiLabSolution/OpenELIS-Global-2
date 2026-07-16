@@ -50,6 +50,7 @@ public class AnalyzerBridgeStartupRegistrarTest {
         analyzer.setName("QuantStudio 7 Flex");
         analyzer.setStatus(Analyzer.AnalyzerStatus.ACTIVE);
         when(analyzerTestMappingService.getAllForAnalyzer(any())).thenReturn(List.of());
+        when(bridgeRegistrationService.isBridgeConfigured()).thenReturn(true);
     }
 
     private static ContextRefreshedEvent rootContextRefreshedEvent() {
@@ -143,6 +144,57 @@ public class AnalyzerBridgeStartupRegistrarTest {
         verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS).times(0)).registerFile(any(), any(), any(), any(),
                 any(), any(), any(), any(), any());
         verify(bridgeRegistrationService, timeout(ASYNC_TIMEOUT_MS).times(0)).registerTcp(any(), any(), any(), any(),
+                any(), any());
+    }
+
+    /**
+     * LIS-261: analyzers WITHOUT transport config (no ip_address, no
+     * importDirectory — e.g. the liquibase-seeded EDAN profiles on a fresh DB)
+     * mean zero registration attempts. That is "nothing to push" (0), NOT "bridge
+     * unreachable" (-1) — returning -1 logged ten misleading "Bridge not
+     * reachable" retries at every boot regardless of bridge state.
+     */
+    @Test
+    public void noTransportConfigReturnsNothingToPushNotUnreachable() {
+        // analyzer has neither ipAddress nor importDirectory set
+        when(analyzerService.getAllWithTypes()).thenReturn(List.of(analyzer));
+
+        org.junit.Assert.assertEquals(0, registrar.pushAllToBridge());
+
+        verify(bridgeRegistrationService, times(0)).registerTcp(any(), any(), any(), any(), any(), any());
+        verify(bridgeRegistrationService, times(0)).registerFile(any(), any(), any(), any(), any(), any(), any(),
+                any(), any());
+    }
+
+    /**
+     * Regression guard for the case -1 is FOR: registrations were attempted and all
+     * failed — that still signals unreachable and drives the retry loop.
+     */
+    @Test
+    public void attemptedButAllFailedStillReturnsUnreachable() {
+        analyzer.setIpAddress("10.0.0.5");
+        when(analyzerService.getAllWithTypes()).thenReturn(List.of(analyzer));
+        when(bridgeRegistrationService.registerTcp(any(), any(), any(), any(), any(), any())).thenReturn(false);
+
+        org.junit.Assert.assertEquals(-1, registrar.pushAllToBridge());
+    }
+
+    /**
+     * LIS-261: a blank analyzer.bridge.url must surface as one INFO-level skip,
+     * not as a retry loop — during LIS-251 the "Bridge not reachable" retries
+     * masked the real failure (an unreadable extra.properties silently blanking
+     * the URL). With the bridge unconfigured the registrar must not even query
+     * analyzers.
+     */
+    @Test
+    public void unconfiguredBridgeUrlSkipsStartupPushEntirely() {
+        when(bridgeRegistrationService.isBridgeConfigured()).thenReturn(false);
+
+        registrar.onStartup(rootContextRefreshedEvent());
+
+        verify(analyzerService, org.mockito.Mockito.after(1_000).never()).getAllWithTypes();
+        verify(bridgeRegistrationService, times(0)).registerTcp(any(), any(), any(), any(), any(), any());
+        verify(bridgeRegistrationService, times(0)).registerFile(any(), any(), any(), any(), any(), any(), any(),
                 any(), any());
     }
 }
