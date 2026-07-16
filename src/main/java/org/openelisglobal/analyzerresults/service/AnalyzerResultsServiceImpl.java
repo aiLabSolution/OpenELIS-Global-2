@@ -99,9 +99,12 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
      * <ol>
      * <li><b>No previous row</b> — fresh insert, nothing flagged.</li>
      * <li><b>True re-import</b> — previous row with the same key AND
-     * {@code completeDate} equal AND {@code result} value equal: skip silently.
+     * {@code completeDate} equal AND {@code result} value equal AND
+     * {@code patientHint} not in conflict (a conflict is two non-blank hints that
+     * differ; a null/blank hint on either side carries no signal): skip silently.
      * This makes re-dropping an identical file completely idempotent (the "same
-     * file output twice" scenario).</li>
+     * file output twice" scenario) while never skipping a different patient's
+     * identical-looking result (LIS-239).</li>
      * <li><b>Anything else on an existing key</b> — insert the incoming row as a
      * linked correction ({@code readOnly=true}, {@code duplicateAnalyzerResultId}
      * backlink on both rows). The staging UI shows both rows linked and
@@ -137,7 +140,8 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
 
                 // Duplicate detection: skip insert ONLY for a true re-import — an
                 // existing staging entry with the SAME completeDate AND the SAME
-                // value (an idempotent re-POST of the same message). Anything else
+                // value AND no patient-hint conflict (an idempotent re-POST of the
+                // same message). Anything else
                 // on an existing (analyzer, accession, test) key stages as a
                 // read-only linked correction so the tech sees it. Matching on
                 // date-or-value alone silently dropped real results: a re-run whose
@@ -154,7 +158,15 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
                                 : foundResult.getCompleteDate().equals(result.getCompleteDate());
                         boolean sameValue = foundResult.getResult() == null ? result.getResult() == null
                                 : foundResult.getResult().equals(result.getResult());
-                        if (sameCompleteDate && sameValue) {
+                        // Two non-blank patient hints that differ mean the "identical"
+                        // row belongs to a DIFFERENT patient (same-day collision under
+                        // a shared/reused accession, LIS-239) — never a re-import, so
+                        // it must stage as a linked correction, not skip. A null/blank
+                        // hint on either side carries no signal (pre-migration rows,
+                        // sources without patient identity) and preserves idempotency.
+                        boolean patientHintConflict = patientHintsConflict(foundResult.getPatientHint(),
+                                result.getPatientHint());
+                        if (sameCompleteDate && sameValue && !patientHintConflict) {
                             duplicateByAccessionAndTestOnly = false;
                             break;
                         }
@@ -196,6 +208,21 @@ public class AnalyzerResultsServiceImpl extends AuditableBaseObjectServiceImpl<A
             LogEvent.logError(e);
             throw new LIMSRuntimeException("Error in AnalyzerResult insertAnalyzerResult()", e);
         }
+    }
+
+    /**
+     * True when two staging patient hints positively identify DIFFERENT patients:
+     * both non-blank and unequal. A null/blank hint on either side carries no
+     * signal — pre-migration rows and sources without a wire patient identity must
+     * neither block nor break idempotency (LIS-239). Shared by the insert dedupe
+     * above and the accept-boundary USE guard
+     * (AnalyzerResultsAcceptServiceImpl.resolveLinkedCorrections).
+     */
+    static boolean patientHintsConflict(String a, String b) {
+        if (GenericValidator.isBlankOrNull(a) || GenericValidator.isBlankOrNull(b)) {
+            return false;
+        }
+        return !a.equals(b);
     }
 
     @Override

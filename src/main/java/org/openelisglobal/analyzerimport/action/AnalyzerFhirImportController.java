@@ -23,6 +23,7 @@ import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Device;
 import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.Observation;
+import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Resource;
 import org.hl7.fhir.r4.model.Specimen;
 import org.openelisglobal.analyzer.service.AnalyzerService;
@@ -61,6 +62,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <li>Observation.code.coding[0].code → testName</li>
  * <li>Observation.value[x] → result</li>
  * <li>Observation.valueQuantity.unit → units</li>
+ * <li>Observation.subject → in-bundle Patient.identifier → patientHint (wire
+ * patient identity, LIS-239; absent Patient/subject → null)</li>
  * <li>X-Analyzer-Id header → analyzerId</li>
  * </ul>
  */
@@ -70,6 +73,9 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
     private static final String CLASS_NAME = "AnalyzerFhirImportController";
     private static final String OPENELIS_FHIR_TAG_SYSTEM = "http://openelis-global.org/fhir/tags";
     private static final String CALIBRATION_TAG = "CALIBRATION";
+    // Identifier system the bridge stamps on the Patient resource it builds from
+    // the wire patient identity (FhirBundleBuilder.ANALYZER_PATIENT_ID_SYSTEM).
+    private static final String ANALYZER_PATIENT_ID_SYSTEM = "http://openelis-global.org/fhir/analyzer-patient-id";
     private static final String LOINC_SYSTEM = "http://loinc.org";
     private static final String UCUM_SYSTEM = "http://unitsofmeasure.org";
 
@@ -203,12 +209,29 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
                 }
             }
 
+            // Collect Patient identifiers (wire patient identity) for the staging
+            // patient hint — same-day two-patient collisions under a shared or
+            // reused accession are only detectable at the accept boundary if this
+            // survives into analyzer_results (LIS-239).
+            Map<String, String> patientIdentifiers = new LinkedHashMap<>();
+            for (Bundle.BundleEntryComponent entry : bundle.getEntry()) {
+                Resource resource = entry.getResource();
+                if (resource instanceof Patient patient) {
+                    String fullUrl = entry.getFullUrl();
+                    String identifier = findAnalyzerPatientId(patient);
+                    if (identifier != null && fullUrl != null) {
+                        patientIdentifiers.put(fullUrl, identifier);
+                    }
+                }
+            }
+
             // Map Observations to AnalyzerResults
             List<AnalyzerResults> results = new ArrayList<>();
             for (Bundle.BundleEntryComponent entry : bundle.getEntry()) {
                 Resource resource = entry.getResource();
                 if (resource instanceof Observation obs) {
-                    AnalyzerResults ar = mapObservationToAnalyzerResult(obs, specimenAccessions, analyzer);
+                    AnalyzerResults ar = mapObservationToAnalyzerResult(obs, specimenAccessions, patientIdentifiers,
+                            analyzer);
                     if (ar != null) {
                         results.add(ar);
                     }
@@ -333,8 +356,29 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         return null;
     }
 
+    /**
+     * The wire patient identity the bridge stamped on this Patient resource — the
+     * identifier under {@link #ANALYZER_PATIENT_ID_SYSTEM}, falling back to the
+     * first identifier with a value. Null (never blank) when none.
+     */
+    private String findAnalyzerPatientId(Patient patient) {
+        String fallback = null;
+        for (org.hl7.fhir.r4.model.Identifier identifier : patient.getIdentifier()) {
+            if (!identifier.hasValue() || identifier.getValue().isBlank()) {
+                continue;
+            }
+            if (ANALYZER_PATIENT_ID_SYSTEM.equals(identifier.getSystem())) {
+                return identifier.getValue();
+            }
+            if (fallback == null) {
+                fallback = identifier.getValue();
+            }
+        }
+        return fallback;
+    }
+
     private AnalyzerResults mapObservationToAnalyzerResult(Observation obs, Map<String, String> specimenAccessions,
-            Analyzer analyzer) {
+            Map<String, String> patientIdentifiers, Analyzer analyzer) {
 
         AnalyzerResults ar = new AnalyzerResults();
 
@@ -354,6 +398,13 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         // Fallback: check Observation.subject.identifier
         if (ar.getAccessionNumber() == null && obs.hasSubject() && obs.getSubject().hasIdentifier()) {
             ar.setAccessionNumber(obs.getSubject().getIdentifier().getValue());
+        }
+
+        // Wire patient identity from the subject's in-bundle Patient (LIS-239).
+        // Absent subject/Patient/identifier → null: a null hint carries no
+        // signal and never blocks downstream.
+        if (obs.hasSubject() && obs.getSubject().hasReference()) {
+            ar.setPatientHint(patientIdentifiers.get(obs.getSubject().getReference()));
         }
 
         if (ar.getAccessionNumber() == null) {

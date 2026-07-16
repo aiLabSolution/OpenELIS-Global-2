@@ -418,4 +418,145 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
         assertNotNull("correction must remain staged, not silently deleted",
                 analyzerResultsService.readAnalyzerResults("1016"));
     }
+
+    // ---------------------------------------------------------------
+    // LIS-239: same-day patient-mismatch guard (two-patient collision)
+    // ---------------------------------------------------------------
+    //
+    // A linked pair on the SAME calendar day is invisible to the LIS-128
+    // cross-day guard, but when the two staging rows carry two DIFFERENT
+    // non-blank wire patient identities (patient_hint, forwarded by the
+    // bridge), the pair is a two-patient collision under a shared sentinel or
+    // mislabeled accession — never an analyzer correction. USE must refuse
+    // fail-closed; DISMISS remains available. Rows without hints (the CORR100
+    // pair above) keep USEing cleanly — null carries no signal.
+
+    // SENT500: same-day two-patient collision — glucose 5.2 (PAT-A) staged
+    // writable, 11.8 (PAT-B) linked as a "correction" under the same shared
+    // accession, 30 minutes apart.
+    private AnalyzerResultItem collisionOriginalItem(boolean accepted, boolean rejected, boolean deleted) {
+        AnalyzerResultItem item = buildItem("1017", "5.2", false, "1018", "4001", "SENT500", "Glucose", 1, accepted,
+                rejected, deleted);
+        item.setCompleteDate("07/01/2025");
+        return item;
+    }
+
+    private AnalyzerResultItem collisionCorrectionItem() {
+        AnalyzerResultItem item = buildItem("1018", "11.8", true, "1017", "4001", "SENT500", "Glucose", 1, false, false,
+                false);
+        item.setCompleteDate("07/01/2025");
+        return item;
+    }
+
+    @Test
+    public void useSameDayPatientMismatch_blocksFailClosedAndLeavesStagingIntact() {
+        AnalyzerResultItem original = collisionOriginalItem(true, false, false);
+        AnalyzerResultItem correction = collisionCorrectionItem();
+        correction.setCorrectionAction("USE");
+        // SENT500 has no registered sample/order — clear the orthogonal LIS-126
+        // unmatched gate so the patient-mismatch guard is what is under test.
+        original.setUnmatchedAction("ACCEPT_UNKNOWN");
+
+        List<AnalyzerResultItem> items = new ArrayList<>(List.of(original, correction));
+
+        UnresolvedCorrectionException ex = assertThrows(UnresolvedCorrectionException.class,
+                () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
+        assertTrue("message must name the blocked accession", ex.getMessage().contains("SENT500"));
+
+        assertNotNull("original must remain staged, not silently deleted",
+                analyzerResultsService.readAnalyzerResults("1017"));
+        assertNotNull("correction must remain staged, not silently deleted",
+                analyzerResultsService.readAnalyzerResults("1018"));
+    }
+
+    @Test
+    public void dismissSameDayPatientMismatch_commitsOriginalAndNotes() {
+        AnalyzerResultItem original = collisionOriginalItem(true, false, false);
+        AnalyzerResultItem correction = collisionCorrectionItem();
+        correction.setCorrectionAction("DISMISS");
+
+        List<AnalyzerResultItem> items = List.of(original, correction);
+        acceptService.hydrateStagingFlags(items);
+        // must not throw — DISMISS stays available for a mismatched pair
+        acceptService.resolveLinkedCorrections(items);
+
+        assertEquals("DISMISS must keep the original value unchanged", "5.2", original.getResult());
+        assertTrue("partner note must record the dismissed value",
+                original.getNote() != null && original.getNote().contains("11.8"));
+    }
+
+    @Test
+    public void clientPostedPatientHint_cannotDefeatMismatchBlock() {
+        // Simulate a tampered/stale POST: the client posts the SAME hint on both
+        // rows. The REST accept path binds posted JSON via Jackson (@RequestBody),
+        // which ignores the controller's setAllowedFields, so a client CAN post
+        // stagingPatientHint. The defense is that hydrateStagingFlags overwrites
+        // it unconditionally from the DB before the mismatch check reads it.
+        AnalyzerResultItem original = collisionOriginalItem(true, false, false);
+        AnalyzerResultItem correction = collisionCorrectionItem();
+        correction.setCorrectionAction("USE");
+        original.setStagingPatientHint("PAT-A");
+        correction.setStagingPatientHint("PAT-A");
+        original.setUnmatchedAction("ACCEPT_UNKNOWN");
+
+        List<AnalyzerResultItem> items = new ArrayList<>(List.of(original, correction));
+
+        UnresolvedCorrectionException ex = assertThrows(
+                "hydration must restore the true DB patient hints, still blocking a mismatched USE",
+                UnresolvedCorrectionException.class, () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
+        assertTrue("message must name the blocked accession", ex.getMessage().contains("SENT500"));
+    }
+
+    @Test
+    public void usePatientMismatchOrphanCorrection_unmappedPartner_blocksFailClosed() {
+        // SENT600: the writable original (1019, PAT-C) is UNMAPPED (no testId),
+        // so hydration forces it readOnly and findPartner cannot see it. The
+        // same-day mismatched USE on 1020 (PAT-D) lands in the orphan branch and
+        // must still be refused via the duplicateAnalyzerResultId backlink lookup
+        // — the same corner the LIS-128 cross-day guard had to close (P2-1).
+        AnalyzerResultItem original = buildItem("1019", "6.1", true, "1020", null, "SENT600", "WBC", 1, true, false,
+                false);
+        original.setCompleteDate("07/01/2025");
+        // 1019 is itself correction-shaped after hydration (readOnly + backlink);
+        // DISMISS it so the orphan USE path — not the unresolved gate — is under test.
+        original.setCorrectionAction("DISMISS");
+        original.setUnmatchedAction("ACCEPT_UNKNOWN");
+
+        AnalyzerResultItem correction = buildItem("1020", "14.9", true, "1019", "4001", "SENT600", "WBC", 1, false,
+                false, false);
+        correction.setCompleteDate("07/01/2025");
+        correction.setCorrectionAction("USE");
+
+        List<AnalyzerResultItem> items = new ArrayList<>(List.of(original, correction));
+
+        UnresolvedCorrectionException ex = assertThrows(UnresolvedCorrectionException.class,
+                () -> acceptService.acceptAndPersist(items, TEST_SYS_USER_ID));
+        assertTrue("message must name the blocked accession", ex.getMessage().contains("SENT600"));
+
+        assertNotNull("unmapped original must remain staged, not silently deleted",
+                analyzerResultsService.readAnalyzerResults("1019"));
+        assertNotNull("correction must remain staged, not silently deleted",
+                analyzerResultsService.readAnalyzerResults("1020"));
+    }
+
+    @Test
+    public void useSameDayCorrection_equalPatientHints_substitutesCleanly() {
+        // SAME700: a genuine same-day corrected re-export where BOTH rows carry
+        // the SAME wire patient identity — equal hints must not block USE.
+        // (The CORR100 tests above keep covering the null-hint case: rows
+        // without any hint must also keep USEing cleanly.)
+        AnalyzerResultItem original = buildItem("1021", "3.2", false, "1022", "4001", "SAME700", "Sodium", 1, true,
+                false, false);
+        AnalyzerResultItem correction = buildItem("1022", "6.4", true, "1021", "4001", "SAME700", "Sodium", 1, false,
+                false, false);
+        correction.setCorrectionAction("USE");
+
+        List<AnalyzerResultItem> items = List.of(original, correction);
+        acceptService.hydrateStagingFlags(items);
+        acceptService.resolveLinkedCorrections(items);
+
+        assertEquals("equal hints must not block — USE substitutes the corrected value", "6.4", original.getResult());
+        assertTrue("partner note must record both values",
+                original.getNote() != null && original.getNote().contains("3.2") && original.getNote().contains("6.4"));
+    }
 }

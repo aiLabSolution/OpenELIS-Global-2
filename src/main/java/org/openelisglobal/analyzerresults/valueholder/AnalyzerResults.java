@@ -76,6 +76,12 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     @Column(name = "normalization_status", length = 20)
     private String normalizationStatus;
 
+    // Wire patient identity forwarded by the analyzer bridge (FHIR Patient
+    // identifier, e.g. HL7 PID-2). Null when the source carried none — a null
+    // carries no signal and never blocks anything (LIS-239).
+    @Column(name = "patient_hint", length = 80)
+    private String patientHint;
+
     @Column(name = "DUPLICATE_ID", length = 10)
     @Convert(converter = StringToIntegerConverter.class)
     private String duplicateAnalyzerResultId;
@@ -229,6 +235,14 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     public void setNormalizationStatus(String normalizationStatus) {
         this.normalizationStatus = normalizationStatus;
+    }
+
+    public String getPatientHint() {
+        return patientHint;
+    }
+
+    public void setPatientHint(String patientHint) {
+        this.patientHint = patientHint;
     }
 
     public void setIsControl(boolean isControl) {
