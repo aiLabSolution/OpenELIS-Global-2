@@ -10,8 +10,14 @@ const RULE_TYPE_OPTIONS = [
   { id: "SPECIMEN_ID_PATTERN", text: "Specimen ID Pattern" },
   { id: "FIELD_CONTAINS", text: "Field Contains" },
   { id: "CALIBRATION_FIELD_EQUALS", text: "Calibration: Field Equals" },
-  { id: "CALIBRATION_SPECIMEN_ID_PREFIX", text: "Calibration: Specimen ID Prefix" },
-  { id: "CALIBRATION_SPECIMEN_ID_PATTERN", text: "Calibration: Specimen ID Pattern" },
+  {
+    id: "CALIBRATION_SPECIMEN_ID_PREFIX",
+    text: "Calibration: Specimen ID Prefix",
+  },
+  {
+    id: "CALIBRATION_SPECIMEN_ID_PATTERN",
+    text: "Calibration: Specimen ID Pattern",
+  },
   { id: "CALIBRATION_FIELD_CONTAINS", text: "Calibration: Field Contains" },
 ];
 
