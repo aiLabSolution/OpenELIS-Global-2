@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="lis97-test-setup" author="labsolution">
+        <sql>CREATE SCHEMA clinlims</sql>
+        <createSequence schemaName="clinlims"
+            sequenceName="result_version_seq" startValue="1" />
+
+        <createTable schemaName="clinlims"
+            tableName="analyzer_results">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="result" type="VARCHAR(200)" />
+        </createTable>
+
+        <createTable schemaName="clinlims" tableName="result">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="value" type="VARCHAR(200)" />
+            <column name="raw_code" type="VARCHAR(80)" />
+            <column name="raw_unit" type="VARCHAR(40)" />
+            <column name="loinc" type="VARCHAR(80)" />
+            <column name="ucum_value" type="VARCHAR(40)" />
+            <column name="status" type="VARCHAR(20)" />
+        </createTable>
+
+        <createTable schemaName="clinlims"
+            tableName="result_version">
+            <column name="id" type="numeric(10,0)"
+                defaultValueComputed="nextval('clinlims.result_version_seq')">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="result_id" type="numeric(10,0)">
+                <constraints nullable="false" />
+            </column>
+            <column name="version_number" type="numeric(10,0)">
+                <constraints nullable="false" />
+            </column>
+            <column name="value" type="VARCHAR(200)" />
+            <column name="raw_code" type="VARCHAR(80)" />
+            <column name="raw_unit" type="VARCHAR(40)" />
+            <column name="loinc" type="VARCHAR(80)" />
+            <column name="ucum_value" type="VARCHAR(40)" />
+            <column name="status" type="VARCHAR(20)" />
+        </createTable>
+    </changeSet>
+
+    <include
+        file="liquibase/3.5.x.x/060-analyzer-results-reference-range.xml" />
+
+    <!-- Production already has this trigger from migration 047. The focused
+        changelog recreates only the minimum pre-LIS-97 schema, so install it after
+        060 replaces the trigger function. -->
+    <changeSet id="lis97-test-result-version-trigger"
+        author="labsolution">
+        <sql>
+            CREATE TRIGGER lis97_test_append_result_version
+            AFTER INSERT OR UPDATE ON clinlims.result
+            FOR EACH ROW EXECUTE FUNCTION clinlims.append_result_version()
+        </sql>
+        <rollback>
+            <sql>DROP TRIGGER lis97_test_append_result_version ON clinlims.result</sql>
+        </rollback>
+    </changeSet>
+
+    <include
+        file="liquibase/3.5.x.x/061-lis97-rollback-evidence-archive.xml" />
+</databaseChangeLog>
