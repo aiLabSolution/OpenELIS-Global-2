@@ -145,4 +145,47 @@ public class BridgeRegistrationServiceTest {
         assertTrue(payload.containsKey("testUnitUcum"));
         assertEquals(new LinkedHashMap<String, String>(), payload.get("testUnitUcum"));
     }
+
+    // ---- attachQcRules (LIS-173 / LIS-269) ----
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void attachQcRulesCarriesCalibrationRuleTypeToBridgePayload() throws Exception {
+        AnalyzerQcRuleService qcRuleService = mock(AnalyzerQcRuleService.class);
+        inject("analyzerQcRuleService", qcRuleService);
+        when(qcRuleService.getActiveRuleDtosForAnalyzer("AN-9"))
+                .thenReturn(List.of(new QcRuleDto("FIELD_EQUALS", "O.12", "Q"),
+                        new QcRuleDto("CALIBRATION_SPECIMEN_ID_PREFIX", null, "CAL-")));
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        svc.attachQcRules(payload, "AN-9");
+
+        List<Map<String, Object>> rules = (List<Map<String, Object>>) payload.get("qcRules");
+        assertEquals(2, rules.size());
+        assertEquals("FIELD_EQUALS", rules.get(0).get("ruleType"));
+        assertEquals("O.12", rules.get(0).get("targetField"));
+        assertEquals("Q", rules.get(0).get("operand"));
+        // The CALIBRATION_ prefix must survive verbatim — the bridge strips it to
+        // pick the base predicate and routes the match to its CALIBRATION class.
+        assertEquals("CALIBRATION_SPECIMEN_ID_PREFIX", rules.get(1).get("ruleType"));
+        assertTrue(!rules.get(1).containsKey("targetField"));
+        assertEquals("CAL-", rules.get(1).get("operand"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void attachQcRulesAlwaysAttachesEvenWhenEmpty() throws Exception {
+        AnalyzerQcRuleService qcRuleService = mock(AnalyzerQcRuleService.class);
+        inject("analyzerQcRuleService", qcRuleService);
+        when(qcRuleService.getActiveRuleDtosForAnalyzer("AN-10")).thenReturn(List.of());
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        svc.attachQcRules(payload, "AN-10");
+
+        // Empty list ≠ field absent: sync must be able to distinguish "no rules —
+        // clear bridge state" from "leave bridge state alone".
+        List<Map<String, Object>> rules = (List<Map<String, Object>>) payload.get("qcRules");
+        assertNotNull(rules);
+        assertEquals(0, rules.size());
+    }
 }
