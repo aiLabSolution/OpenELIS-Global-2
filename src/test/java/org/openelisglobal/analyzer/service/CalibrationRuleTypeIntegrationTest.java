@@ -76,13 +76,20 @@ public class CalibrationRuleTypeIntegrationTest extends BaseWebContextSensitiveT
 
             List<Map<String, Object>> rules = (List<Map<String, Object>>) payload.get("qcRules");
             assertNotNull("attachQcRules must always attach a qcRules list", rules);
-            assertEquals("both fixture rules must be pushed", 2, rules.size());
+            assertEquals(
+                    "exactly the two ACTIVE fixture rules must be pushed — the inactive"
+                            + " CALIBRATION_SPECIMEN_ID_PREFIX placeholder must never reach the bridge"
+                            + " (its inertness is this filter; the bridge honors any rule it receives)",
+                    2, rules.size());
             assertEquals("FIELD_EQUALS", rules.get(0).get("ruleType"));
             assertEquals("O.12", rules.get(0).get("targetField"));
             assertEquals("Q", rules.get(0).get("operand"));
             assertEquals("the CALIBRATION_ prefix must survive verbatim to the bridge payload",
                     "CALIBRATION_SPECIMEN_ID_PATTERN", rules.get(1).get("ruleType"));
             assertEquals("^CAL-[A-Z0-9-]+$", rules.get(1).get("operand"));
+            for (Map<String, Object> rule : rules) {
+                assertTrue("inactive rule leaked into the bridge payload", !"CAL-".equals(rule.get("operand")));
+            }
         } finally {
             cleanupFixture();
         }
@@ -108,6 +115,13 @@ public class CalibrationRuleTypeIntegrationTest extends BaseWebContextSensitiveT
                     + " (id, analyzer_id, rule_type, target_field, operand, is_active, display_order, last_updated)"
                     + " VALUES (gen_random_uuid()::text, " + FIXTURE_ANALYZER_ID
                     + ", 'CALIBRATION_SPECIMEN_ID_PATTERN', NULL, '^CAL-[A-Z0-9-]+$', true, 2, now())");
+            // Mirrors the snibe-maglumi-x3 profile's shipped-inactive placeholder: the
+            // bridge has no isActive concept and honors any rule it receives, so OE's
+            // active-only filter is the ONLY thing keeping this off the wire.
+            st.executeUpdate("INSERT INTO clinlims.analyzer_qc_rule"
+                    + " (id, analyzer_id, rule_type, target_field, operand, is_active, display_order, last_updated)"
+                    + " VALUES (gen_random_uuid()::text, " + FIXTURE_ANALYZER_ID
+                    + ", 'CALIBRATION_SPECIMEN_ID_PREFIX', NULL, 'CAL-', false, 3, now())");
         }
     }
 
