@@ -126,15 +126,15 @@ public class AnalyzerQcRuleServiceImpl extends BaseObjectServiceImpl<AnalyzerQcR
         }
 
         switch (rule.getRuleType()) {
-        case FIELD_EQUALS, FIELD_CONTAINS -> {
+        case FIELD_EQUALS, FIELD_CONTAINS, CALIBRATION_FIELD_EQUALS, CALIBRATION_FIELD_CONTAINS -> {
             if (rule.getTargetField() == null || rule.getTargetField().isBlank()) {
                 throw new IllegalArgumentException("target_field is required for " + rule.getRuleType());
             }
         }
-        case SPECIMEN_ID_PREFIX -> {
+        case SPECIMEN_ID_PREFIX, CALIBRATION_SPECIMEN_ID_PREFIX -> {
             // operand is the prefix string; no special validation beyond non-blank
         }
-        case SPECIMEN_ID_PATTERN -> {
+        case SPECIMEN_ID_PATTERN, CALIBRATION_SPECIMEN_ID_PATTERN -> {
             try {
                 Pattern.compile(rule.getOperand());
             } catch (PatternSyntaxException e) {

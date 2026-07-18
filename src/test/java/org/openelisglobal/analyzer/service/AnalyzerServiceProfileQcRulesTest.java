@@ -106,6 +106,36 @@ public class AnalyzerServiceProfileQcRulesTest {
     }
 
     @Test
+    public void testAutoCreateTestMappings_WithCalibrationRuleInProfile_CreatesDbRow() {
+        // LIS-173: an analyzer profile carrying a CALIBRATION_SPECIMEN_ID_PREFIX
+        // rule creates the AnalyzerQcRule via the same profile-seeding path used
+        // for ordinary QC rules — proves the calibration path is provisionable,
+        // not just expressible in isolation.
+        Map<String, Object> calibrationRule = Map.of("ruleType", "CALIBRATION_SPECIMEN_ID_PREFIX", "operand", "CAL-",
+                "isActive", true, "sortOrder", 1);
+        Map<String, Object> configDefaults = new HashMap<>();
+        configDefaults.put("qcRules", List.of(calibrationRule));
+        Map<String, Object> config = new HashMap<>();
+        config.put("configDefaults", configDefaults);
+
+        Analyzer analyzer = new Analyzer();
+        analyzer.setId("1");
+        when(analyzerQcRuleService.createRule(anyString(), any(AnalyzerQcRule.class), anyString()))
+                .thenAnswer(inv -> inv.getArgument(1));
+
+        analyzerService.autoCreateTestMappings("1", config, "1");
+
+        ArgumentCaptor<AnalyzerQcRule> ruleCaptor = ArgumentCaptor.forClass(AnalyzerQcRule.class);
+        verify(analyzerQcRuleService, times(1)).createRule(eq("1"), ruleCaptor.capture(), eq("1"));
+
+        AnalyzerQcRule captured = ruleCaptor.getValue();
+        assertEquals(RuleType.CALIBRATION_SPECIMEN_ID_PREFIX, captured.getRuleType());
+        assertNull(captured.getTargetField());
+        assertEquals("CAL-", captured.getOperand());
+        assertEquals(true, captured.isActive());
+    }
+
+    @Test
     public void testAutoCreateTestMappings_WithNullRuleType_SkipsRule() {
         Map<String, Object> badRule = new HashMap<>();
         badRule.put("ruleType", null);
