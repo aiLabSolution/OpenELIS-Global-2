@@ -789,6 +789,10 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         org.junit.Assert.assertNotNull("skewed clock must be flagged", staged.getImportIssueReason());
         org.junit.Assert.assertTrue("import_issue_reason must record the clock-skew flag",
                 staged.getImportIssueReason().contains("clock-skew"));
+        org.junit.Assert.assertTrue(
+                "import_issue_reason must also retain the coexisting unmapped-LOINC reason — "
+                        + "appendImportIssueReason must comma-join, not clobber (LIS-271)",
+                staged.getImportIssueReason().contains("unmapped_loinc:WBC"));
         org.junit.Assert.assertEquals("completeDate must still reflect the analyzer-reported time verbatim",
                 analyzerClock.getEpochSecond(), staged.getCompleteDate().toInstant().getEpochSecond());
         org.junit.Assert.assertNotNull("importReceivedTime must be recorded for provenance",
@@ -796,6 +800,53 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         org.junit.Assert.assertTrue("importReceivedTime must reflect OE's own receive clock, not the analyzer's clock",
                 staged.getImportReceivedTime().getTime() >= beforeImport
                         && staged.getImportReceivedTime().getTime() <= afterImport);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_LoincMappedResultWithSkewedClock_StagesAcceptableAndFlagsClockSkew() throws Exception {
+        // LIS-271 P1 fix: the policy is flag-never-block, and the regression it
+        // forbids is a skewed-but-LOINC-mapped result becoming unacceptable. Unlike
+        // importFhirBundle_SkewedAnalyzerClock_FlagsClockSkewWithoutBlocking (which
+        // uses an UNMAPPED code and so is read-only for an unrelated reason), this
+        // uses a LOINC-mapped code so readOnly is driven ONLY by the clock-skew path
+        // — proving clock skew alone never flips readOnly or drops testId.
+        org.openelisglobal.test.valueholder.Test whiteBloodCell = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(whiteBloodCell.getId()).thenReturn("55");
+        when(testService.getTestsByLoincCode("6690-2")).thenReturn(List.of(whiteBloodCell));
+
+        java.time.Instant analyzerClock = java.time.Instant.now().minus(400, java.time.temporal.ChronoUnit.DAYS)
+                .truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String effectiveDateTime = java.time.format.DateTimeFormatter.ISO_INSTANT.format(analyzerClock);
+
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"ACC-271-MAPPED-SKEW\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"system\":\"http://loinc.org\",\"code\":\"6690-2\"}]},"
+                + "\"effectiveDateTime\":\"" + effectiveDateTime + "\","
+                + "\"valueQuantity\":{\"value\":7.5,\"unit\":\"10^9/L\"}}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+
+        org.junit.Assert.assertFalse(
+                "a LOINC-mapped result must stay acceptable (readOnly=false) despite a skewed analyzer clock — "
+                        + "clock-skew flags, it never blocks/holds (LIS-271 policy)",
+                staged.isReadOnly());
+        org.junit.Assert.assertNotNull("LOINC resolution must still set testId when the clock is skewed",
+                staged.getTestId());
+        org.junit.Assert.assertEquals("55", staged.getTestId());
+        org.junit.Assert.assertNotNull("skewed clock must still be flagged even though the result is mapped",
+                staged.getImportIssueReason());
+        org.junit.Assert.assertTrue("import_issue_reason must record the clock-skew flag",
+                staged.getImportIssueReason().contains("clock-skew"));
     }
 
     @Test
