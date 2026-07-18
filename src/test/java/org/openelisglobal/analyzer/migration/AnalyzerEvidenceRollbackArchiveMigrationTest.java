@@ -1,6 +1,7 @@
 package org.openelisglobal.analyzer.migration;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -65,14 +66,16 @@ public class AnalyzerEvidenceRollbackArchiveMigrationTest {
                     scalar(connection, "SELECT abnormal_flag FROM clinlims.result WHERE id = 201"));
 
             assertEquals(3, count(connection, "SELECT COUNT(*) FROM clinlims.analyzer_evidence_rollback_archive"));
-            assertArchived(connection, "analyzer_results", "staging-value");
-            assertArchived(connection, "result", "clinical-value");
-            assertArchived(connection, "result_version", "clinical-value");
+            assertArchived(connection, "analyzer_results", 101, null, null, "staging-value");
+            assertArchived(connection, "result", 201, 201, null, "clinical-value");
+            assertArchived(connection, "result_version", 1, 201, 1, "clinical-value");
             assertArchiveMutationRejected(connection, "UPDATE clinlims.analyzer_evidence_rollback_archive "
                     + "SET reference_range = 'tampered' WHERE source_table = 'result'");
             assertArchiveMutationRejected(connection,
                     "DELETE FROM clinlims.analyzer_evidence_rollback_archive WHERE source_table = 'result'");
-            assertOverLimitWriteRejected(connection);
+            assertOverLimitWriteRejected(connection, "analyzer_results", 101,
+                    "ck_analyzer_results_lis97_legacy_evidence_width");
+            assertOverLimitWriteRejected(connection, "result", 201, "ck_result_lis97_legacy_evidence_width");
 
             // Continue through the focused fixture trigger and 060 changesets
             // 005, 004, and 003. Changesets 001/002 remain so their legacy
@@ -88,8 +91,19 @@ public class AnalyzerEvidenceRollbackArchiveMigrationTest {
             assertEquals(3, count(connection, "SELECT COUNT(*) FROM clinlims.analyzer_evidence_rollback_archive"));
             assertEquals("text", scalar(connection, "SELECT data_type FROM information_schema.columns "
                     + "WHERE table_schema = 'clinlims' AND table_name = 'result' AND column_name = 'reference_range'"));
-            updateResultRange(connection, LONG_RANGE);
+            assertEquals("text",
+                    scalar(connection,
+                            "SELECT data_type FROM information_schema.columns "
+                                    + "WHERE table_schema = 'clinlims' AND table_name = 'analyzer_results' "
+                                    + "AND column_name = 'reference_range'"));
+            updateEvidence(connection, "analyzer_results", 101, LONG_RANGE, LONG_FLAG);
+            updateEvidence(connection, "result", 201, LONG_RANGE, LONG_FLAG);
+            assertEquals(LONG_RANGE,
+                    scalar(connection, "SELECT reference_range FROM clinlims.analyzer_results WHERE id = 101"));
+            assertEquals(LONG_FLAG,
+                    scalar(connection, "SELECT abnormal_flag FROM clinlims.analyzer_results WHERE id = 101"));
             assertEquals(LONG_RANGE, scalar(connection, "SELECT reference_range FROM clinlims.result WHERE id = 201"));
+            assertEquals(LONG_FLAG, scalar(connection, "SELECT abnormal_flag FROM clinlims.result WHERE id = 201"));
             database.close();
         }
     }
@@ -112,18 +126,31 @@ public class AnalyzerEvidenceRollbackArchiveMigrationTest {
         assertEquals(1, count(connection, "SELECT COUNT(*) FROM clinlims.result_version WHERE result_id = 201"));
     }
 
-    private void assertArchived(Connection connection, String sourceTable, String expectedValue) throws SQLException {
+    private void assertArchived(Connection connection, String sourceTable, int expectedSourceRecordId,
+            Integer expectedResultId, Integer expectedVersionNumber, String expectedValue) throws SQLException {
         try (PreparedStatement statement = connection
-                .prepareStatement("SELECT current_value, reference_range, abnormal_flag, evidence_digest "
+                .prepareStatement("SELECT source_record_id, result_id, version_number, current_value, "
+                        + "reference_range, abnormal_flag, evidence_digest "
                         + "FROM clinlims.analyzer_evidence_rollback_archive WHERE source_table = ?")) {
             statement.setString(1, sourceTable);
             try (ResultSet resultSet = statement.executeQuery()) {
                 assertTrue("missing archive row for " + sourceTable, resultSet.next());
+                assertEquals(expectedSourceRecordId, resultSet.getInt("source_record_id"));
+                assertNullableInteger(expectedResultId, resultSet, "result_id");
+                assertNullableInteger(expectedVersionNumber, resultSet, "version_number");
                 assertEquals(expectedValue, resultSet.getString("current_value"));
                 assertEquals(LONG_RANGE, resultSet.getString("reference_range"));
                 assertEquals(LONG_FLAG, resultSet.getString("abnormal_flag"));
                 assertEquals(32, resultSet.getString("evidence_digest").length());
             }
+        }
+    }
+
+    private void assertNullableInteger(Integer expected, ResultSet resultSet, String column) throws SQLException {
+        if (expected == null) {
+            assertNull(resultSet.getObject(column));
+        } else {
+            assertEquals(expected.intValue(), resultSet.getInt(column));
         }
     }
 
@@ -140,23 +167,27 @@ public class AnalyzerEvidenceRollbackArchiveMigrationTest {
         }
     }
 
-    private void assertOverLimitWriteRejected(Connection connection) throws SQLException {
+    private void assertOverLimitWriteRejected(Connection connection, String table, int id, String constraintName)
+            throws SQLException {
         try {
-            updateResultRange(connection, LONG_RANGE);
-            fail("legacy-width guard should reject new over-limit evidence during a staged rollback");
+            updateEvidence(connection, table, id, LONG_RANGE, LONG_FLAG);
+            fail("legacy-width guard should reject new over-limit evidence for " + table);
         } catch (SQLException exception) {
             String message = exception.getMessage();
             if (!connection.getAutoCommit()) {
                 connection.rollback();
             }
-            assertTrue(message.contains("ck_result_lis97_legacy_evidence_width"));
+            assertTrue(message.contains(constraintName));
         }
     }
 
-    private void updateResultRange(Connection connection, String referenceRange) throws SQLException {
-        try (PreparedStatement statement = connection
-                .prepareStatement("UPDATE clinlims.result SET reference_range = ? WHERE id = 201")) {
+    private void updateEvidence(Connection connection, String table, int id, String referenceRange, String abnormalFlag)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE clinlims." + table + " SET reference_range = ?, abnormal_flag = ? WHERE id = ?")) {
             statement.setString(1, referenceRange);
+            statement.setString(2, abnormalFlag);
+            statement.setInt(3, id);
             statement.executeUpdate();
         }
     }
