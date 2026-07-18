@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.openelisglobal.analysis.service.AnalysisService;
 import org.openelisglobal.analysis.valueholder.Analysis;
+import org.openelisglobal.common.exception.LIMSRuntimeException;
 import org.openelisglobal.common.log.LogEvent;
 import org.openelisglobal.common.services.IResultSaveService;
 import org.openelisglobal.common.services.IStatusService;
@@ -11,6 +12,8 @@ import org.openelisglobal.common.services.ResultSaveService;
 import org.openelisglobal.common.services.StatusService.AnalysisStatus;
 import org.openelisglobal.common.services.StatusService.OrderStatus;
 import org.openelisglobal.common.services.registration.interfaces.IResultUpdate;
+import org.openelisglobal.common.util.ConfigurationProperties;
+import org.openelisglobal.common.util.ConfigurationProperties.Property;
 import org.openelisglobal.note.service.NoteService;
 import org.openelisglobal.note.valueholder.Note;
 import org.openelisglobal.notification.service.TestNotificationService;
@@ -32,14 +35,63 @@ public class ResultValidationServiceImpl implements ResultValidationService {
     private NoteService noteService;
     private SampleService sampleService;
     private TestNotificationService testNotificationService;
+    private IStatusService statusService;
 
     public ResultValidationServiceImpl(AnalysisService analysisService, ResultService resultService,
-            NoteService noteService, SampleService sampleService, TestNotificationService testNotificationService) {
+            NoteService noteService, SampleService sampleService, TestNotificationService testNotificationService,
+            IStatusService statusService) {
         this.analysisService = analysisService;
         this.resultService = resultService;
         this.noteService = noteService;
         this.sampleService = sampleService;
         this.testNotificationService = testNotificationService;
+        this.statusService = statusService;
+    }
+
+    @Override
+    public void markAnalysisReleased(Analysis analysis, String sysUserId) {
+        // Fail-closed held-state guard (LIS-56): only an analysis actually
+        // sitting in the human validation queue is releasable. The analysis
+        // handed in is loaded from the database by the caller, so its statusId
+        // is server truth; anything else (already Finalized, NotStarted, a
+        // tampered/stale id...) must not be silently re-finalized.
+        requireHeld(analysis, "release");
+
+        // Same transition the autoverification gate performs system-side
+        // (AutoverificationGateServiceImpl#autoFinalize) — the two must stay in
+        // lock-step for the released-state contract (Finalized + releasedDate).
+        analysis.setSysUserId(sysUserId);
+        analysis.setStatusId(statusService.getStatusID(AnalysisStatus.Finalized));
+        analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
+    }
+
+    @Override
+    public void markAnalysisRejected(Analysis analysis, String sysUserId) {
+        // Same fail-closed guard as release: a reject may only send a still-held
+        // analysis back to the bench. Without it, a stale/concurrent reject would
+        // flip an already-released (Finalized) analysis to BiologistRejected,
+        // retracting finalized clinical output and leaving a release timestamp on
+        // a rejected row.
+        requireHeld(analysis, "reject");
+
+        analysis.setSysUserId(sysUserId);
+        analysis.setStatusId(statusService.getStatusID(AnalysisStatus.BiologistRejected));
+    }
+
+    /**
+     * A validation-queue status transition (release or reject) is permitted only
+     * while the analysis is still held — Technical Acceptance always, Technical
+     * Rejection only when the queue is configured to include it. Throws otherwise.
+     */
+    private void requireHeld(Analysis analysis, String action) {
+        String statusId = analysis.getStatusId();
+        boolean held = statusService.getStatusID(AnalysisStatus.TechnicalAcceptance).equals(statusId)
+                || (ConfigurationProperties.getInstance().isPropertyValueEqual(Property.VALIDATE_REJECTED_TESTS, "true")
+                        && statusService.getStatusID(AnalysisStatus.TechnicalRejected).equals(statusId));
+        if (!held) {
+            throw new LIMSRuntimeException("Refusing to " + action + " analysis " + analysis.getId() + ": status "
+                    + statusId + " is not a held validation-queue status (it may have already been validated)");
+        }
     }
 
     @Override

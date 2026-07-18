@@ -85,6 +85,7 @@ import org.openelisglobal.common.services.TableIdService;
 import org.openelisglobal.common.util.ConfigurationProperties;
 import org.openelisglobal.common.util.ConfigurationProperties.Property;
 import org.openelisglobal.common.util.DateUtil;
+import org.openelisglobal.common.util.StringUtil;
 import org.openelisglobal.common.util.validator.GenericValidator;
 import org.openelisglobal.common.valueholder.BaseObject;
 import org.openelisglobal.dataexchange.fhir.FhirConfig;
@@ -2137,6 +2138,13 @@ public class FhirTransformServiceImpl implements FhirTransformService {
                 observation.setValue(codeableConcept);
             } else if (TypeOfTestResultServiceImpl.ResultType.isNumeric(result.getResultType())) {
                 Quantity quantity = new Quantity();
+                // Off-scale qualified results (<0.008, >=500) carry their limit as
+                // Quantity.comparator so the qualifier survives the re-export to the
+                // HIS/FHIR store; getValue(true) supplies the bare magnitude (LIS-252).
+                String comparator = StringUtil.getLeadingComparator(result.getValue());
+                if (comparator != null) {
+                    quantity.setComparator(Quantity.QuantityComparator.fromCode(comparator));
+                }
                 quantity.setValue(new BigDecimal(result.getValue(true)));
                 quantity.setUnit(resultService.getUOM(result));
                 observation.setValue(quantity);

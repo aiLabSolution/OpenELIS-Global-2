@@ -253,7 +253,13 @@ public class BridgeRegistrationService {
         }
     }
 
-    private boolean isBridgeConfigured() {
+    /**
+     * Whether {@code analyzer.bridge.url} is set. Package-private so
+     * {@link AnalyzerBridgeStartupRegistrar} can skip its startup push (and its
+     * retry loop) with a single INFO line instead of retrying against a URL that is
+     * not configured — the per-call DEBUG below never reaches container logs.
+     */
+    boolean isBridgeConfigured() {
         if (bridgeBaseUrl == null || bridgeBaseUrl.isBlank()) {
             LogEvent.logDebug(CLASS_NAME, "isBridgeConfigured",
                     "No analyzer.bridge.url configured — skipping bridge registration");

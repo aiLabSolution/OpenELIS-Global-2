@@ -64,6 +64,7 @@ import org.openelisglobal.testresult.service.TestResultService;
 import org.openelisglobal.testresult.valueholder.TestResult;
 import org.openelisglobal.typeoftestresult.service.TypeOfTestResultServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.Errors;
@@ -215,6 +216,10 @@ public class AccessionValidationRangeController extends BaseResultValidationCont
         return validationStatus;
     }
 
+    // LIS-56: endpoint access for validation-queue actors; the release decision
+    // itself is gated at the accepted-item branch (requireReleaseAuthority) — see
+    // AccessionValidationRestController#showAccessionValidationRangeSave.
+    @PreAuthorize("hasAnyRole('PATHOLOGIST', 'VALIDATION')")
     @RequestMapping(value = "/AccessionValidationRange", method = RequestMethod.POST)
     public ModelAndView showAccessionValidationRangeSave(HttpServletRequest request,
             @ModelAttribute("form") @Validated(ResultValidationForm.ResultValidation.class) ResultValidationForm form,
@@ -369,6 +374,10 @@ public class AccessionValidationRangeController extends BaseResultValidationCont
             List<Result> resultUpdateList, List<Note> noteUpdateList, List<Result> deletableList,
             IResultSaveService resultValidationSave, boolean areListeners) {
 
+        // LIS-56: fail closed on a contradictory submission (one analysis both
+        // accepted and rejected across its result rows) before any mutation
+        assertConsistentDispositions(analysisItems);
+
         List<String> analysisIdList = new ArrayList<>();
 
         for (AnalysisItem analysisItem : analysisItems) {
@@ -380,16 +389,14 @@ public class AccessionValidationRangeController extends BaseResultValidationCont
                 if (!analysisIdList.contains(analysis.getId())) {
 
                     if (analysisItem.getIsAccepted()) {
-                        analysis.setStatusId(
-                                SpringContext.getBean(IStatusService.class).getStatusID(AnalysisStatus.Finalized));
-                        analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
+                        requireReleaseAuthority(analysis, getSysUserId(request));
+                        resultValidationService.markAnalysisReleased(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }
 
                     if (analysisItem.getIsRejected()) {
-                        analysis.setStatusId(SpringContext.getBean(IStatusService.class)
-                                .getStatusID(AnalysisStatus.BiologistRejected));
+                        resultValidationService.markAnalysisRejected(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }

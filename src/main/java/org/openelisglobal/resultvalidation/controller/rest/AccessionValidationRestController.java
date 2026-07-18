@@ -63,6 +63,7 @@ import org.openelisglobal.testresult.valueholder.TestResult;
 import org.openelisglobal.typeoftestresult.service.TypeOfTestResultServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.Errors;
@@ -257,6 +258,17 @@ public class AccessionValidationRestController extends BaseResultValidationContr
         return validationStatus;
     }
 
+    /**
+     * LIS-56: this save handles paging, rejection AND release. Endpoint access is
+     * for validation-queue actors (the legacy module interceptor does NOT cover
+     * this endpoint — no system_module_url row for the /rest path — so it
+     * fail-opened to any authenticated user before this annotation). The RELEASE
+     * decision itself is gated separately and precisely at the accepted-item branch
+     * by {@code requireReleaseAuthority} — pathologist role + lab-unit scope — so
+     * Validation-role users keep paging and rejection. Role names normalize via
+     * CustomUserDetailsService.toRoleAuthority for form and SSO logins alike.
+     */
+    @PreAuthorize("hasAnyRole('PATHOLOGIST', 'VALIDATION')")
     @PostMapping(value = "AccessionValidation", produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public ResultValidationForm showAccessionValidationRangeSave(HttpServletRequest request,
@@ -400,6 +412,10 @@ public class AccessionValidationRestController extends BaseResultValidationContr
             List<Result> resultUpdateList, List<Note> noteUpdateList, List<Result> deletableList,
             IResultSaveService resultValidationSave, boolean areListeners) {
 
+        // LIS-56: fail closed on a contradictory submission (one analysis both
+        // accepted and rejected across its result rows) before any mutation
+        assertConsistentDispositions(analysisItems);
+
         List<String> analysisIdList = new ArrayList<>();
 
         for (AnalysisItem analysisItem : analysisItems) {
@@ -411,16 +427,14 @@ public class AccessionValidationRestController extends BaseResultValidationContr
                 if (!analysisIdList.contains(analysis.getId())) {
 
                     if (analysisItem.getIsAccepted()) {
-                        analysis.setStatusId(
-                                SpringContext.getBean(IStatusService.class).getStatusID(AnalysisStatus.Finalized));
-                        analysis.setReleasedDate(new java.sql.Timestamp(System.currentTimeMillis()));
+                        requireReleaseAuthority(analysis, getSysUserId(request));
+                        resultValidationService.markAnalysisReleased(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }
 
                     if (analysisItem.getIsRejected()) {
-                        analysis.setStatusId(SpringContext.getBean(IStatusService.class)
-                                .getStatusID(AnalysisStatus.BiologistRejected));
+                        resultValidationService.markAnalysisRejected(analysis, getSysUserId(request));
                         analysisIdList.add(analysis.getId());
                         analysisUpdateList.add(analysis);
                     }

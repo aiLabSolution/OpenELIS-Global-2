@@ -233,6 +233,72 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
 
     @Test
     @SuppressWarnings("unchecked")
+    public void importFhirBundle_QualifiedQuantityComparator_StagesHumanReadableNumericResult() throws Exception {
+        // LIS-252: off-scale qualified results ride as Quantity.comparator + magnitude.
+        // OE must reconstruct the human-readable qualified value (<0.008, >1000,
+        // <=0.01, >=500) and stage it as a numeric result — never drop the comparator.
+        org.openelisglobal.test.valueholder.Test tsh = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(tsh.getId()).thenReturn("77");
+        when(testService.getTestsByLoincCode("3016-3")).thenReturn(List.of(tsh));
+
+        String obs = "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"system\":\"http://loinc.org\",\"code\":\"3016-3\"}]},"
+                + "\"valueQuantity\":{\"comparator\":\"%s\",\"value\":%s,\"unit\":\"uIU/mL\","
+                + "\"system\":\"http://unitsofmeasure.org\",\"code\":\"u[IU]/mL\"}}}";
+        String bundleJson = "{\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"LIS-252-Q\"}]}},"
+                + String.format(obs, "<", "0.008") + "," + String.format(obs, ">", "1000") + ","
+                + String.format(obs, "<=", "0.01") + "," + String.format(obs, ">=", "500") + "]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(4));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
+        org.junit.Assert.assertEquals(List.of("<0.008", ">1000", "<=0.01", ">=500"),
+                inserted.stream().map(AnalyzerResults::getResult).toList());
+        for (AnalyzerResults staged : inserted) {
+            org.junit.Assert.assertEquals("N", staged.getResultType());
+            org.junit.Assert.assertEquals("77", staged.getTestId());
+            org.junit.Assert.assertEquals("uIU/mL", staged.getUnits());
+            org.junit.Assert.assertEquals("u[IU]/mL", staged.getUcumValue());
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_PlainQuantity_StagesMagnitudeWithoutComparator() throws Exception {
+        // Backward compatibility: an ordinary numeric Quantity must stage as the bare
+        // magnitude with no comparator prefix (LIS-252).
+        org.openelisglobal.test.valueholder.Test tsh = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(tsh.getId()).thenReturn("77");
+        when(testService.getTestsByLoincCode("3016-3")).thenReturn(List.of(tsh));
+
+        String bundleJson = "{\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"LIS-252-PLAIN\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"system\":\"http://loinc.org\",\"code\":\"3016-3\"}]},"
+                + "\"valueQuantity\":{\"value\":2.31,\"unit\":\"uIU/mL\"}}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertEquals("2.31", staged.getResult());
+        org.junit.Assert.assertEquals("N", staged.getResultType());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     public void importFhirBundle_DualCodedTextResult_IsPartialWithoutUcum() throws Exception {
         org.openelisglobal.test.valueholder.Test whiteBloodCell = org.mockito.Mockito
                 .mock(org.openelisglobal.test.valueholder.Test.class);

@@ -60,6 +60,16 @@ public class AnalyzerBridgeStartupRegistrar {
     }
 
     private void pushAllWithRetry() {
+        if (!bridgeRegistrationService.isBridgeConfigured()) {
+            // Surface the blank analyzer.bridge.url ONCE at INFO — the per-call
+            // DEBUG inside BridgeRegistrationService is invisible in container
+            // logs, and retrying against an unconfigured URL logged misleading
+            // "Bridge not reachable" lines that masked the real failure during
+            // LIS-251 (an unreadable extra.properties blanking the URL).
+            logger.info("analyzer.bridge.url is not configured — skipping startup bridge registration"
+                    + " (bridge will pull from OE on its own startup)");
+            return;
+        }
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             int registered = pushAllToBridge();
             if (registered >= 0) {
@@ -84,9 +94,11 @@ public class AnalyzerBridgeStartupRegistrar {
     /**
      * Push all active analyzers to bridge.
      *
-     * @return number of successful registrations, or -1 if bridge is unreachable
+     * @return number of successful registrations; 0 when there was nothing to push
+     *         (no analyzers, or none with transport config); -1 only when
+     *         registrations were attempted and all failed (bridge unreachable)
      */
-    private int pushAllToBridge() {
+    int pushAllToBridge() {
         try {
             List<Analyzer> analyzers = analyzerService.getAllWithTypes();
             if (analyzers.isEmpty()) {
@@ -94,7 +106,7 @@ public class AnalyzerBridgeStartupRegistrar {
             }
 
             int registered = 0;
-            boolean bridgeReachable = false;
+            int attempted = 0;
 
             for (Analyzer analyzer : analyzers) {
                 if (analyzer.getStatus() == Analyzer.AnalyzerStatus.DELETED) {
@@ -106,31 +118,43 @@ public class AnalyzerBridgeStartupRegistrar {
 
                 // TCP analyzers (ASTM/HL7)
                 if (analyzer.getIpAddress() != null && !analyzer.getIpAddress().isBlank()) {
+                    attempted++;
                     String protocol = analyzer.getProtocolVersion() != null && analyzer.getProtocolVersion().isHl7()
                             ? "HL7"
                             : "ASTM";
                     if (bridgeRegistrationService.registerTcp(analyzerId, analyzerName, analyzer.getIpAddress(),
                             analyzer.getPort(), protocol, analyzer.getIdentifierPattern())) {
                         registered++;
-                        bridgeReachable = true;
                     }
                 }
 
                 // FILE analyzers — read from unified Analyzer entity
                 if (analyzer.getImportDirectory() != null && !analyzer.getImportDirectory().isBlank()) {
+                    attempted++;
                     List<String> testMappings = analyzerTestMappingService.getAllForAnalyzer(analyzerId).stream()
                             .map(AnalyzerTestMapping::getAnalyzerTestName).distinct().collect(Collectors.toList());
                     if (bridgeRegistrationService.registerFile(analyzerId, analyzerName, analyzer.getImportDirectory(),
                             analyzer.getFilePattern(), analyzer.getColumnMappings(), analyzer.getFileFormat(),
                             analyzer.getDelimiter(), analyzer.getSkipRows(), testMappings)) {
                         registered++;
-                        bridgeReachable = true;
                     }
                 }
             }
 
-            // If we tried to register but nothing succeeded, bridge is likely down
-            if (!bridgeReachable) {
+            if (attempted == 0) {
+                // Analyzers exist but none carries transport config — ip_address
+                // and importDirectory are deliberately operator-set (the
+                // liquibase-seeded EDAN profiles ship without them), so a fresh
+                // install always lands here. Zero attempts is not evidence the
+                // bridge is down; returning -1 logged ten misleading "Bridge not
+                // reachable" retries at every boot (LIS-261).
+                logger.info("No analyzers carry transport config (ip_address/importDirectory)"
+                        + " — nothing to push to bridge");
+                return 0;
+            }
+
+            // Registrations were attempted but none succeeded — bridge is likely down
+            if (registered == 0) {
                 return -1;
             }
 
