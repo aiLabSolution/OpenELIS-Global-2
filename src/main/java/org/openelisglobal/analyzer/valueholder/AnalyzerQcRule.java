@@ -22,10 +22,11 @@ public class AnalyzerQcRule extends BaseObject<String> {
         // LIS-173: calibration-classification counterparts. OE only ever *pushes*
         // these (no OE-side routing consumes RuleType) — the bridge/edge-sim
         // Kind.CALIBRATION path is what actually acts on a CALIBRATION_* match.
-        // No profile currently ships a CALIBRATION_* rule: the concrete per-analyzer
-        // calibration convention is unconfirmed pending a chassis-attached capture
-        // (LIS-266). Provisioning one of these values does not by itself prove any
-        // analyzer's real calibration discriminator.
+        // The only shipped CALIBRATION_* rule (snibe-maglumi-x3 profile) is a
+        // deliberately-INACTIVE placeholder: the concrete per-analyzer calibration
+        // convention is unconfirmed pending a chassis-attached capture (LIS-266).
+        // Provisioning one of these values does not by itself prove any analyzer's
+        // real calibration discriminator.
         CALIBRATION_FIELD_EQUALS, CALIBRATION_FIELD_CONTAINS, CALIBRATION_SPECIMEN_ID_PREFIX,
         CALIBRATION_SPECIMEN_ID_PATTERN
     }

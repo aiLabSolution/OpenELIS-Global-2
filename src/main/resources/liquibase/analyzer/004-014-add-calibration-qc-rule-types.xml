@@ -16,10 +16,11 @@
         (CALIBRATION_SPECIMEN_ID_PATTERN is 31 chars) and extend the CHECK
         constraint to accept the new values.
 
-        This changeset makes the calibration rule *expressible*, not *provisioned*:
-        no analyzer profile ships a CALIBRATION_* rule yet. The concrete
-        per-analyzer calibration Sample-ID/field convention (e.g. for the MAGLUMI
-        X3) is still unconfirmed pending a chassis-attached capture (LIS-266).
+        This changeset makes the calibration rule *expressible*, not *proven*:
+        the only shipped CALIBRATION_* rule (snibe-maglumi-x3 profile) is a
+        deliberately-inactive placeholder. The concrete per-analyzer calibration
+        Sample-ID/field convention (e.g. for the MAGLUMI X3) is still unconfirmed
+        pending a chassis-attached capture (LIS-266).
     -->
     <changeSet id="analyzer-014-widen-qc-rule-type-column" author="lis-173-calibration-rule-types">
         <preConditions onFail="MARK_RAN">
