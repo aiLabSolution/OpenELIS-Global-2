@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="lis97-006-create-rollback-evidence-archive" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists schemaName="clinlims" tableName="analyzer_evidence_rollback_archive"/>
+            </not>
+        </preConditions>
+        <comment>Create a soft-reference, append-only archive for the exact analyzer evidence that a downgrade of LIS-97 cannot represent in the legacy schema. The table is normally empty and is deliberately retained across rollback.</comment>
+
+        <createSequence schemaName="clinlims" sequenceName="analyzer_evidence_rollback_archive_seq"
+            startValue="1" incrementBy="1"/>
+
+        <createTable schemaName="clinlims" tableName="analyzer_evidence_rollback_archive">
+            <column name="id" type="numeric(10,0)"
+                defaultValueComputed="nextval('clinlims.analyzer_evidence_rollback_archive_seq')">
+                <constraints primaryKey="true" primaryKeyName="analyzer_evidence_rollback_archive_pkey"
+                    nullable="false"/>
+            </column>
+            <column name="source_table" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_record_id" type="numeric(10,0)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="result_id" type="numeric(10,0)"/>
+            <column name="version_number" type="numeric(10,0)"/>
+            <column name="current_value" type="TEXT"/>
+            <column name="reference_range" type="TEXT"/>
+            <column name="abnormal_flag" type="TEXT"/>
+            <column name="evidence_digest" type="CHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="archived_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint schemaName="clinlims" tableName="analyzer_evidence_rollback_archive"
+            columnNames="source_table, source_record_id, evidence_digest"
+            constraintName="uq_analyzer_evidence_rollback_archive_source_digest"/>
+
+        <rollback>
+            <!-- Deliberately retained: rollback evidence must outlive the columns
+                 whose exact values the legacy schema cannot represent. -->
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis97-007-archive-evidence-before-legacy-rollback" author="labsolution">
+        <preConditions onFail="HALT">
+            <tableExists schemaName="clinlims" tableName="analyzer_evidence_rollback_archive"/>
+            <columnExists schemaName="clinlims" tableName="analyzer_results" columnName="reference_range"/>
+            <columnExists schemaName="clinlims" tableName="result" columnName="reference_range"/>
+            <columnExists schemaName="clinlims" tableName="result_version" columnName="reference_range"/>
+        </preConditions>
+        <comment>Make the downgrade archive immutable. On rollback, capture byte-complete evidence from staging, the current result, and every result version before deterministically clamping only the two live tables to the legacy 80/40 limits. The archive remains available for recovery and audit after older rollback steps drop or narrow their source columns.</comment>
+
+        <sql splitStatements="false">
+            ALTER TABLE clinlims.analyzer_results
+                DROP CONSTRAINT IF EXISTS ck_analyzer_results_lis97_legacy_evidence_width;
+            ALTER TABLE clinlims.result
+                DROP CONSTRAINT IF EXISTS ck_result_lis97_legacy_evidence_width;
+
+            CREATE OR REPLACE FUNCTION clinlims.reject_analyzer_evidence_rollback_archive_mutation()
+            RETURNS TRIGGER AS $BODY$
+            BEGIN
+                RAISE EXCEPTION 'analyzer_evidence_rollback_archive is append-only'
+                    USING ERRCODE = '55000';
+            END;
+            $BODY$ LANGUAGE plpgsql;
+
+            DROP TRIGGER IF EXISTS analyzer_evidence_rollback_archive_immutable
+                ON clinlims.analyzer_evidence_rollback_archive;
+            CREATE TRIGGER analyzer_evidence_rollback_archive_immutable
+                BEFORE UPDATE OR DELETE ON clinlims.analyzer_evidence_rollback_archive
+                FOR EACH ROW EXECUTE FUNCTION clinlims.reject_analyzer_evidence_rollback_archive_mutation();
+        </sql>
+
+        <rollback>
+            <sql>
+                INSERT INTO clinlims.analyzer_evidence_rollback_archive
+                    (source_table, source_record_id, current_value, reference_range, abnormal_flag,
+                     evidence_digest)
+                SELECT 'analyzer_results', ar.id, ar.result, ar.reference_range, ar.abnormal_flag,
+                       md5(jsonb_build_object(
+                           'source_table', 'analyzer_results',
+                           'source_record_id', ar.id,
+                           'current_value', ar.result,
+                           'reference_range', ar.reference_range,
+                           'abnormal_flag', ar.abnormal_flag)::text)
+                  FROM clinlims.analyzer_results ar
+                 WHERE ar.reference_range IS NOT NULL OR ar.abnormal_flag IS NOT NULL
+                ON CONFLICT (source_table, source_record_id, evidence_digest) DO NOTHING;
+
+                INSERT INTO clinlims.analyzer_evidence_rollback_archive
+                    (source_table, source_record_id, result_id, current_value, reference_range,
+                     abnormal_flag, evidence_digest)
+                SELECT 'result', r.id, r.id, r.value, r.reference_range, r.abnormal_flag,
+                       md5(jsonb_build_object(
+                           'source_table', 'result',
+                           'source_record_id', r.id,
+                           'result_id', r.id,
+                           'current_value', r.value,
+                           'reference_range', r.reference_range,
+                           'abnormal_flag', r.abnormal_flag)::text)
+                  FROM clinlims.result r
+                 WHERE r.reference_range IS NOT NULL OR r.abnormal_flag IS NOT NULL
+                ON CONFLICT (source_table, source_record_id, evidence_digest) DO NOTHING;
+
+                INSERT INTO clinlims.analyzer_evidence_rollback_archive
+                    (source_table, source_record_id, result_id, version_number, current_value,
+                     reference_range, abnormal_flag, evidence_digest)
+                SELECT 'result_version', rv.id, rv.result_id, rv.version_number, rv.value,
+                       rv.reference_range, rv.abnormal_flag,
+                       md5(jsonb_build_object(
+                           'source_table', 'result_version',
+                           'source_record_id', rv.id,
+                           'result_id', rv.result_id,
+                           'version_number', rv.version_number,
+                           'current_value', rv.value,
+                           'reference_range', rv.reference_range,
+                           'abnormal_flag', rv.abnormal_flag)::text)
+                  FROM clinlims.result_version rv
+                 WHERE rv.reference_range IS NOT NULL OR rv.abnormal_flag IS NOT NULL
+                ON CONFLICT (source_table, source_record_id, evidence_digest) DO NOTHING;
+
+                UPDATE clinlims.analyzer_results
+                   SET reference_range = CASE WHEN char_length(reference_range) &gt; 80
+                                              THEN left(reference_range, 80) ELSE reference_range END,
+                       abnormal_flag = CASE WHEN char_length(abnormal_flag) &gt; 40
+                                            THEN left(abnormal_flag, 40) ELSE abnormal_flag END
+                 WHERE char_length(reference_range) &gt; 80 OR char_length(abnormal_flag) &gt; 40;
+
+                UPDATE clinlims.result
+                   SET reference_range = CASE WHEN char_length(reference_range) &gt; 80
+                                              THEN left(reference_range, 80) ELSE reference_range END,
+                       abnormal_flag = CASE WHEN char_length(abnormal_flag) &gt; 40
+                                            THEN left(abnormal_flag, 40) ELSE abnormal_flag END
+                 WHERE char_length(reference_range) &gt; 80 OR char_length(abnormal_flag) &gt; 40;
+
+                ALTER TABLE clinlims.analyzer_results
+                    ADD CONSTRAINT ck_analyzer_results_lis97_legacy_evidence_width
+                    CHECK ((reference_range IS NULL OR char_length(reference_range) &lt;= 80)
+                       AND (abnormal_flag IS NULL OR char_length(abnormal_flag) &lt;= 40));
+                ALTER TABLE clinlims.result
+                    ADD CONSTRAINT ck_result_lis97_legacy_evidence_width
+                    CHECK ((reference_range IS NULL OR char_length(reference_range) &lt;= 80)
+                       AND (abnormal_flag IS NULL OR char_length(abnormal_flag) &lt;= 40));
+            </sql>
+            <!-- Keep the archive table, sequence, function, and UPDATE/DELETE
+                 guard. They are the durable disposition for evidence that the
+                 rolled-back schema no longer represents losslessly. -->
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

@@ -184,4 +184,7 @@
   <!-- LIS-97: preserve the analyzer-provided reference range and abnormal flag (bridge FHIR referenceRange/interpretation) through staging and acceptance as analyzer evidence. 059 = LIS-239. -->
   <include relativeToChangelogFile="true" file="060-analyzer-results-reference-range.xml"/>
 
+  <!-- LIS-97 follow-up: preserve full analyzer evidence in an append-only archive before a downgrade restores the legacy VARCHAR limits. -->
+  <include relativeToChangelogFile="true" file="061-lis97-rollback-evidence-archive.xml"/>
+
 </databaseChangeLog>
