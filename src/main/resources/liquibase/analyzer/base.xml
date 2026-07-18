@@ -7,5 +7,7 @@
   <!-- FR-15: QC Sample Identification Rules -->
   <include relativeToChangelogFile="true" file="004-012-create-analyzer-qc-rule.xml"/>
   <include relativeToChangelogFile="true" file="004-013-seed-default-qc-rules.xml"/>
+  <!-- LIS-173: express CALIBRATION_* rule types (calibration gate provisioning) -->
+  <include relativeToChangelogFile="true" file="004-014-add-calibration-qc-rule-types.xml"/>
 
 </databaseChangeLog>

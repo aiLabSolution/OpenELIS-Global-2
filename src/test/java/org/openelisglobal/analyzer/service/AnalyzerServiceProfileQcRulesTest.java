@@ -106,6 +106,59 @@ public class AnalyzerServiceProfileQcRulesTest {
     }
 
     @Test
+    public void testAutoCreateTestMappings_WithCalibrationRuleInProfile_CreatesDbRow() {
+        // LIS-173: an analyzer profile carrying a CALIBRATION_SPECIMEN_ID_PREFIX
+        // rule creates the AnalyzerQcRule via the same profile-seeding path used
+        // for ordinary QC rules — proves the calibration path is provisionable,
+        // not just expressible in isolation.
+        Map<String, Object> calibrationRule = Map.of("ruleType", "CALIBRATION_SPECIMEN_ID_PREFIX", "operand", "CAL-",
+                "isActive", true, "sortOrder", 1);
+        Map<String, Object> configDefaults = new HashMap<>();
+        configDefaults.put("qcRules", List.of(calibrationRule));
+        Map<String, Object> config = new HashMap<>();
+        config.put("configDefaults", configDefaults);
+
+        Analyzer analyzer = new Analyzer();
+        analyzer.setId("1");
+        when(analyzerQcRuleService.createRule(anyString(), any(AnalyzerQcRule.class), anyString()))
+                .thenAnswer(inv -> inv.getArgument(1));
+
+        analyzerService.autoCreateTestMappings("1", config, "1");
+
+        ArgumentCaptor<AnalyzerQcRule> ruleCaptor = ArgumentCaptor.forClass(AnalyzerQcRule.class);
+        verify(analyzerQcRuleService, times(1)).createRule(eq("1"), ruleCaptor.capture(), eq("1"));
+
+        AnalyzerQcRule captured = ruleCaptor.getValue();
+        assertEquals(RuleType.CALIBRATION_SPECIMEN_ID_PREFIX, captured.getRuleType());
+        assertNull(captured.getTargetField());
+        assertEquals("CAL-", captured.getOperand());
+        assertEquals(true, captured.isActive());
+    }
+
+    @Test
+    public void testAutoCreateTestMappings_WithInactiveCalibrationRuleInProfile_SeedsItInactive() {
+        // The safety property of the shipped snibe-maglumi-x3 placeholder: a profile
+        // rule with isActive:false must seed with active=false, so the active-only
+        // push filter keeps it off the bridge. A truthiness regression here would
+        // ship an unverified CAL- rule ACTIVE to the bridge with nothing red.
+        Map<String, Object> inactiveRule = Map.of("ruleType", "CALIBRATION_SPECIMEN_ID_PREFIX", "operand", "CAL-",
+                "isActive", false, "sortOrder", 1);
+        Map<String, Object> configDefaults = new HashMap<>();
+        configDefaults.put("qcRules", List.of(inactiveRule));
+        Map<String, Object> config = new HashMap<>();
+        config.put("configDefaults", configDefaults);
+
+        when(analyzerQcRuleService.createRule(anyString(), any(AnalyzerQcRule.class), anyString()))
+                .thenAnswer(inv -> inv.getArgument(1));
+
+        analyzerService.autoCreateTestMappings("1", config, "1");
+
+        ArgumentCaptor<AnalyzerQcRule> ruleCaptor = ArgumentCaptor.forClass(AnalyzerQcRule.class);
+        verify(analyzerQcRuleService, times(1)).createRule(eq("1"), ruleCaptor.capture(), eq("1"));
+        assertEquals(false, ruleCaptor.getValue().isActive());
+    }
+
+    @Test
     public void testAutoCreateTestMappings_WithNullRuleType_SkipsRule() {
         Map<String, Object> badRule = new HashMap<>();
         badRule.put("ruleType", null);
