@@ -180,6 +180,23 @@ public class FhirResultDiagnosticReportValidationTest {
     }
 
     @Test
+    public void resultWithLongAnalyzerEvidence_emitsCompleteSuffixWithoutTruncation() {
+        FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
+        String longRange = "Analyzer reference range: " + "r".repeat(90) + "::RANGE-END";
+        String longFlag = "Analyzer interpretation: " + "f".repeat(50) + "::FLAG-END";
+        when(fixture.result.getReferenceRange()).thenReturn(longRange);
+        when(fixture.result.getAbnormalFlag()).thenReturn(longFlag);
+
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+
+        assertEquals(longRange, observation.getReferenceRangeFirstRep().getText());
+        assertTrue(observation.getReferenceRangeFirstRep().getText().endsWith("::RANGE-END"));
+        assertEquals(longFlag, observation.getInterpretationFirstRep().getText());
+        assertTrue(observation.getInterpretationFirstRep().getText().endsWith("::FLAG-END"));
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+    }
+
+    @Test
     public void resultWithNonStandardFlag_emitsInterpretationTextOnly() {
         // A wire flag without a v3 counterpart round-trips as interpretation
         // text — never dropped, never force-coded (mirrors the bridge, LIS-119).
@@ -197,8 +214,9 @@ public class FhirResultDiagnosticReportValidationTest {
 
     @Test
     public void resultWithoutAnalyzerEvidence_emitsNoReferenceRangeOrInterpretation() {
-        // LIS-97 backward compatibility: results with no analyzer evidence
-        // (manual entry, pre-LIS-97 accepts) emit neither element.
+        // LIS-97 current-row semantics: results with no analyzer evidence
+        // (manual entry, pre-LIS-97 accepts, or a manual value edit whose setter
+        // cleared stale analyzer context) emit neither element.
         FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
 
         Observation observation = fhirTransformService.transformResultToObservation(fixture.result);

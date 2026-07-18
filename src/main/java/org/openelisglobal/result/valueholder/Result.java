@@ -152,6 +152,18 @@ public class Result extends EnumValueItemImpl {
     }
 
     public void setValue(String value) {
+        // The current Result row is the supported display/FHIR source. Analyzer
+        // range/flag evidence describes the analyzer-supplied value that arrived
+        // with it; carrying that evidence across a different manually assigned
+        // value would make the current row clinically misleading. Centralize the
+        // invariant here so every routine validation/correction path (including
+        // managed-entity and direct-DAO paths) clears stale evidence. Analyzer
+        // acceptance assigns the selected value first, then supplies the selected
+        // staging row's fresh evidence.
+        if (!Objects.equals(this.value, value)) {
+            referenceRange = null;
+            abnormalFlag = null;
+        }
         this.value = value;
     }
 

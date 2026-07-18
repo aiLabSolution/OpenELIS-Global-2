@@ -43,4 +43,113 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="lis97-003-widen-analyzer-evidence" author="labsolution">
+        <preConditions onFail="HALT">
+            <columnExists schemaName="clinlims" tableName="analyzer_results" columnName="reference_range"/>
+            <columnExists schemaName="clinlims" tableName="analyzer_results" columnName="abnormal_flag"/>
+            <columnExists schemaName="clinlims" tableName="result" columnName="reference_range"/>
+            <columnExists schemaName="clinlims" tableName="result" columnName="abnormal_flag"/>
+        </preConditions>
+        <comment>Widen analyzer range/flag evidence to unbounded text without rewriting the already-published lis97-001/lis97-002 checksums. The current result row is the supported display/FHIR source: analyzer acceptance replaces evidence with the selected value's pair, while a manual value change clears it so stale evidence is never exported.</comment>
+
+        <modifyDataType schemaName="clinlims" tableName="analyzer_results" columnName="reference_range" newDataType="TEXT"/>
+        <modifyDataType schemaName="clinlims" tableName="analyzer_results" columnName="abnormal_flag" newDataType="TEXT"/>
+        <modifyDataType schemaName="clinlims" tableName="result" columnName="reference_range" newDataType="TEXT"/>
+        <modifyDataType schemaName="clinlims" tableName="result" columnName="abnormal_flag" newDataType="TEXT"/>
+
+        <rollback>
+            <modifyDataType schemaName="clinlims" tableName="analyzer_results" columnName="reference_range" newDataType="VARCHAR(80)"/>
+            <modifyDataType schemaName="clinlims" tableName="analyzer_results" columnName="abnormal_flag" newDataType="VARCHAR(40)"/>
+            <modifyDataType schemaName="clinlims" tableName="result" columnName="reference_range" newDataType="VARCHAR(80)"/>
+            <modifyDataType schemaName="clinlims" tableName="result" columnName="abnormal_flag" newDataType="VARCHAR(40)"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis97-004-add-result-version-reference-range" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists schemaName="clinlims" tableName="result_version" columnName="reference_range"/>
+            </not>
+        </preConditions>
+        <comment>Add analyzer range/flag to each immutable result_version snapshot so every value version retains the evidence that was current with that value (LIS-97).</comment>
+
+        <addColumn schemaName="clinlims" tableName="result_version">
+            <column name="reference_range" type="TEXT"/>
+            <column name="abnormal_flag" type="TEXT"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn schemaName="clinlims" tableName="result_version" columnName="reference_range"/>
+            <dropColumn schemaName="clinlims" tableName="result_version" columnName="abnormal_flag"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis97-005-version-analyzer-evidence" author="labsolution">
+        <preConditions onFail="HALT">
+            <columnExists schemaName="clinlims" tableName="result_version" columnName="reference_range"/>
+            <columnExists schemaName="clinlims" tableName="result_version" columnName="abnormal_flag"/>
+        </preConditions>
+        <comment>Replace append_result_version so analyzer range/flag changes create and populate an immutable value/evidence snapshot (LIS-97).</comment>
+
+        <sql splitStatements="false">
+            CREATE OR REPLACE FUNCTION clinlims.append_result_version()
+            RETURNS TRIGGER AS $BODY$
+            BEGIN
+                IF (TG_OP = 'UPDATE'
+                    AND OLD.value IS NOT DISTINCT FROM NEW.value
+                    AND OLD.raw_code IS NOT DISTINCT FROM NEW.raw_code
+                    AND OLD.raw_unit IS NOT DISTINCT FROM NEW.raw_unit
+                    AND OLD.loinc IS NOT DISTINCT FROM NEW.loinc
+                    AND OLD.ucum_value IS NOT DISTINCT FROM NEW.ucum_value
+                    AND OLD.status IS NOT DISTINCT FROM NEW.status
+                    AND OLD.reference_range IS NOT DISTINCT FROM NEW.reference_range
+                    AND OLD.abnormal_flag IS NOT DISTINCT FROM NEW.abnormal_flag) THEN
+                    RETURN NULL;
+                END IF;
+
+                INSERT INTO clinlims.result_version
+                    (result_id, version_number, value, raw_code, raw_unit, loinc, ucum_value, status,
+                     reference_range, abnormal_flag)
+                VALUES
+                    (NEW.id,
+                     (SELECT COALESCE(MAX(rv.version_number), 0) + 1
+                        FROM clinlims.result_version rv WHERE rv.result_id = NEW.id),
+                     NEW.value, NEW.raw_code, NEW.raw_unit, NEW.loinc, NEW.ucum_value, NEW.status,
+                     NEW.reference_range, NEW.abnormal_flag);
+                RETURN NULL;
+            END;
+            $BODY$ LANGUAGE plpgsql;
+        </sql>
+
+        <rollback>
+            <!-- Restore the immutable migration-047 function contract before the
+                 preceding rollback drops the new result_version columns. -->
+            <sql splitStatements="false">
+                CREATE OR REPLACE FUNCTION clinlims.append_result_version()
+                RETURNS TRIGGER AS $BODY$
+                BEGIN
+                    IF (TG_OP = 'UPDATE'
+                        AND OLD.value IS NOT DISTINCT FROM NEW.value
+                        AND OLD.raw_code IS NOT DISTINCT FROM NEW.raw_code
+                        AND OLD.raw_unit IS NOT DISTINCT FROM NEW.raw_unit
+                        AND OLD.loinc IS NOT DISTINCT FROM NEW.loinc
+                        AND OLD.ucum_value IS NOT DISTINCT FROM NEW.ucum_value
+                        AND OLD.status IS NOT DISTINCT FROM NEW.status) THEN
+                        RETURN NULL;
+                    END IF;
+
+                    INSERT INTO clinlims.result_version
+                        (result_id, version_number, value, raw_code, raw_unit, loinc, ucum_value, status)
+                    VALUES
+                        (NEW.id,
+                         (SELECT COALESCE(MAX(rv.version_number), 0) + 1
+                            FROM clinlims.result_version rv WHERE rv.result_id = NEW.id),
+                         NEW.value, NEW.raw_code, NEW.raw_unit, NEW.loinc, NEW.ucum_value, NEW.status);
+                    RETURN NULL;
+                END;
+                $BODY$ LANGUAGE plpgsql;
+            </sql>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

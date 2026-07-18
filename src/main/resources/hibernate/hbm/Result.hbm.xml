@@ -42,7 +42,7 @@
             lazy="false">
             <column name="RESULT_TYPE" length="1" />
         </property>
-        <property name="value" type="java.lang.String">
+        <property name="value" type="java.lang.String" access="field">
             <column name="VALUE" length="200" />
         </property>
         <!-- LIS-7 / S0.5 — raw analyzer observation beside its normalized LOINC/UCUM
@@ -64,11 +64,13 @@
         </property>
         <!-- LIS-97 — analyzer-provided range/flag evidence, distinct from the
             lab-owned min_normal/max_normal (result_limits) below. -->
-        <property name="referenceRange" type="java.lang.String">
-            <column name="REFERENCE_RANGE" length="80" />
+        <property name="referenceRange" type="java.lang.String"
+            access="field">
+            <column name="REFERENCE_RANGE" sql-type="text" />
         </property>
-        <property name="abnormalFlag" type="java.lang.String">
-            <column name="ABNORMAL_FLAG" length="40" />
+        <property name="abnormalFlag" type="java.lang.String"
+            access="field">
+            <column name="ABNORMAL_FLAG" sql-type="text" />
         </property>
         <property name="minNormal" type="java.lang.Double"
             column="min_normal" />

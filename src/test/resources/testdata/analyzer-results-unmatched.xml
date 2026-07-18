@@ -37,7 +37,8 @@
         read_only="false" positive="false" complete_date="2025-07-01 08:00:00"
         test_result_type="N" test_id="4001" raw_code="K" raw_unit="mmol/L"
         loinc="2823-3" ucum_value="mmol/L" normalization_status="NORMALIZED"
-        reference_range="3.5 to 5.1" abnormal_flag="N" />
+        reference_range="Analyzer-provided reference range text whose clinically relevant qualifier extends well beyond eighty characters :: RANGE-END"
+        abnormal_flag="Analyzer-provided non-standard interpretation whose suffix must survive :: FLAG-END" />
 
     <!-- id=3011: a second walk-up arrival for the same MRN-accession, staged
         after the first was accepted (find-or-attach leg). -->
@@ -46,7 +47,8 @@
         units="mmol/L" iscontrol="false" last_updated="2025-07-02 08:00:00"
         read_only="false" positive="false" complete_date="2025-07-02 08:00:00"
         test_result_type="N" test_id="4001" raw_code="K-SECOND"
-        raw_unit="mEq/L" loinc="2823-3" normalization_status="PARTIAL" />
+        raw_unit="mEq/L" loinc="2823-3" normalization_status="PARTIAL"
+        reference_range="4.0 to 6.0" abnormal_flag="H" />
 
     <!-- id=3020: QC result — control accessions never have an order, so control
         groups must stay exempt from the gate. -->

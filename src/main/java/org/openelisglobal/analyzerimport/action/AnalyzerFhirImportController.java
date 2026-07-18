@@ -563,12 +563,11 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
         // HL7 OBX-7/OBX-8 → bridge FHIR referenceRange/interpretation, LIS-119).
         // Stored verbatim as analyzer EVIDENCE — never recomputed here and never
         // fed into the lab-owned result_limits range applied at accept
-        // (LIS-188/LIS-191). Display/audit-only signal, so over-length values
-        // truncate (LIS-244); absent fields stay null (LIS-97).
-        ar.setReferenceRange(truncateForStaging(findReferenceRange(obs), AnalyzerResults.REFERENCE_RANGE_MAX_LENGTH,
-                "reference_range", ar.getAccessionNumber()));
-        ar.setAbnormalFlag(truncateForStaging(findAbnormalFlag(obs), AnalyzerResults.ABNORMAL_FLAG_MAX_LENGTH,
-                "abnormal_flag", ar.getAccessionNumber()));
+        // (LIS-188/LIS-191). These evidence fields are backed by TEXT and are
+        // deliberately stored losslessly; general request-size limits remain at
+        // the HTTP transport boundary. Absent fields stay null (LIS-97).
+        ar.setReferenceRange(findReferenceRange(obs));
+        ar.setAbnormalFlag(findAbnormalFlag(obs));
 
         // QC/control flag from bridge tag. QC (MSH-16=2) rows are staged for the
         // Westgard pipeline and audit trail, but marked read-only so the analyzer-

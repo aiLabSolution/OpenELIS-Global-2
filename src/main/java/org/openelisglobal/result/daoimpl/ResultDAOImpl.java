@@ -55,7 +55,7 @@ public class ResultDAOImpl extends BaseDAOImpl<Result, String> implements Result
         try {
             Result re = entityManager.unwrap(Session.class).get(Result.class, result.getId());
             if (re != null) {
-                PropertyUtils.copyProperties(result, re);
+                copyResultProperties(result, re);
             } else {
                 result.setId(null);
             }
@@ -87,7 +87,7 @@ public class ResultDAOImpl extends BaseDAOImpl<Result, String> implements Result
                 thisResult = null;
             }
             if (thisResult != null) {
-                PropertyUtils.copyProperties(result, thisResult);
+                copyResultProperties(result, thisResult);
             } else {
                 result.setId(null);
             }
@@ -140,7 +140,7 @@ public class ResultDAOImpl extends BaseDAOImpl<Result, String> implements Result
                 thisResult = null;
             }
             if (thisResult != null) {
-                PropertyUtils.copyProperties(result, thisResult);
+                copyResultProperties(result, thisResult);
             } else {
                 result.setId(null);
             }
@@ -149,6 +149,18 @@ public class ResultDAOImpl extends BaseDAOImpl<Result, String> implements Result
             LogEvent.logError(e);
             throw new LIMSRuntimeException("Error in Result getResultByTestResult()", e);
         }
+    }
+
+    /**
+     * Copy a persisted result without letting JavaBeans descriptor order make
+     * {@link Result#setValue(String)} mistake hydration for a manual value change.
+     * PropertyUtils copies abnormalFlag/referenceRange before value on Java 21, so
+     * pre-seeding value makes its later setter call a no-op for evidence clearing.
+     */
+    private void copyResultProperties(Result target, Result source)
+            throws IllegalAccessException, InvocationTargetException, NoSuchMethodException {
+        target.setValue(source.getValue());
+        PropertyUtils.copyProperties(target, source);
     }
 
     @Override

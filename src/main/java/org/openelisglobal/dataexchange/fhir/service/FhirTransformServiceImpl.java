@@ -2167,7 +2167,9 @@ public class FhirTransformServiceImpl implements FhirTransformService {
         // verbatim (never recomputed), interpretation coded against v3
         // ObservationInterpretation for recognized flags and carried as text
         // otherwise so no flag is ever dropped. The lab-owned result_limits
-        // range (minNormal/maxNormal) is deliberately NOT emitted here.
+        // range (minNormal/maxNormal) is deliberately NOT emitted here. Routine
+        // manual value changes clear these fields in Result.setValue, so absent
+        // evidence here also prevents stale analyzer context from being exported.
         if (!GenericValidator.isBlankOrNull(result.getReferenceRange())) {
             observation.addReferenceRange().setText(result.getReferenceRange());
         }

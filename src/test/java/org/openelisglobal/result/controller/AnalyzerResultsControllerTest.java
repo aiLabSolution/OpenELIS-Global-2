@@ -51,4 +51,11 @@ public class AnalyzerResultsControllerTest extends BaseWebContextSensitiveTest {
                 .andExpect(jsonPath("$.resultList[0].ucumValue").value("mmol/L"))
                 .andExpect(jsonPath("$.resultList[0].normalizationStatus").value("NORMALIZED"));
     }
+
+    @Test
+    public void showRestAnalyzerResults_ShouldExposeAnalyzerRangeAndFlag() throws Exception {
+        mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultList[0].referenceRange").value("3.9-6.1 mmol/L"))
+                .andExpect(jsonPath("$.resultList[0].abnormalFlag").value("N"));
+    }
 }

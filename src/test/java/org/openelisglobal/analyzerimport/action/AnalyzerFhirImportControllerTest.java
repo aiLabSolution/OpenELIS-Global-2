@@ -834,12 +834,12 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
 
     @Test
     @SuppressWarnings("unchecked")
-    public void importFhirBundle_OverlongRangeAndFlag_TruncateAsSignalFields() throws Exception {
-        // LIS-244 semantics: range/flag are display/audit signal, not identity —
-        // over-length values truncate with a log instead of failing the bundle
-        // (which the bridge would re-POST forever).
-        String overlongRange = "r".repeat(AnalyzerResults.REFERENCE_RANGE_MAX_LENGTH + 10);
-        String overlongFlag = "f".repeat(AnalyzerResults.ABNORMAL_FLAG_MAX_LENGTH + 10);
+    public void importFhirBundle_LongRangeAndFlag_PreservesCompleteAnalyzerEvidence() throws Exception {
+        // LIS-97: range/flag are analyzer evidence, so the complete wire value must
+        // survive import. In particular, the suffix beyond the old VARCHAR(80/40)
+        // limits is durable evidence and may not be replaced by a log message.
+        String overlongRange = "Analyzer reference range: " + "r".repeat(90) + "::RANGE-END";
+        String overlongFlag = "Analyzer interpretation: " + "f".repeat(50) + "::FLAG-END";
         String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
                 + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
                 + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-LONG-1\"}]}},"
@@ -855,7 +855,9 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
         ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
         verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
         AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
-        org.junit.Assert.assertEquals(AnalyzerResults.REFERENCE_RANGE_MAX_LENGTH, staged.getReferenceRange().length());
-        org.junit.Assert.assertEquals(AnalyzerResults.ABNORMAL_FLAG_MAX_LENGTH, staged.getAbnormalFlag().length());
+        org.junit.Assert.assertEquals(overlongRange, staged.getReferenceRange());
+        org.junit.Assert.assertTrue(staged.getReferenceRange().endsWith("::RANGE-END"));
+        org.junit.Assert.assertEquals(overlongFlag, staged.getAbnormalFlag());
+        org.junit.Assert.assertTrue(staged.getAbnormalFlag().endsWith("::FLAG-END"));
     }
 }

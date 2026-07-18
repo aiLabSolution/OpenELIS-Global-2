@@ -40,7 +40,8 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     // Column widths of the wire-derived staging fields. The FHIR import boundary
     // (AnalyzerFhirImportController) enforces these before insert — accession
-    // rejects the bundle, signal fields truncate — because an over-length value
+    // rejects the bundle, bounded signal fields truncate — because an over-length
+    // value
     // otherwise fails the whole bundle insert and the bridge re-POSTs it forever
     // (LIS-244). accession_number is 25, not the pre-031 20: liquibase 031
     // widened the DB column for 10-char SITEYEARNUM prefixes.
@@ -51,8 +52,6 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     public static final int UCUM_VALUE_MAX_LENGTH = 40;
     public static final int PATIENT_HINT_MAX_LENGTH = 80;
     public static final int IMPORT_ISSUE_REASON_MAX_LENGTH = 200;
-    public static final int REFERENCE_RANGE_MAX_LENGTH = 80;
-    public static final int ABNORMAL_FLAG_MAX_LENGTH = 40;
 
     @Id
     @Column(name = "ID", precision = 10, scale = 0)
@@ -103,10 +102,10 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     // .interpretation). Analyzer EVIDENCE only — the lab-owned result_limits
     // range applied at accept (LIS-188/LIS-191) is never derived from, nor
     // overwritten by, these. Null when the source carried none (LIS-97).
-    @Column(name = "reference_range", length = REFERENCE_RANGE_MAX_LENGTH)
+    @Column(name = "reference_range", columnDefinition = "TEXT")
     private String referenceRange;
 
-    @Column(name = "abnormal_flag", length = ABNORMAL_FLAG_MAX_LENGTH)
+    @Column(name = "abnormal_flag", columnDefinition = "TEXT")
     private String abnormalFlag;
 
     @Column(name = "DUPLICATE_ID", length = 10)
