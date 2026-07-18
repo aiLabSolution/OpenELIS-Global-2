@@ -756,6 +756,179 @@ public class AnalyzerFhirImportControllerTest extends BaseWebContextSensitiveTes
 
     @Test
     @SuppressWarnings("unchecked")
+    public void importFhirBundle_X3AstmRangeAndCodedNormalFlag_StagedVerbatim() throws Exception {
+        // LIS-97: the exact shape the bridge emits for MAGLUMI X3 native ASTM
+        // R.6/R.7 (LIS-119) — referenceRange.text carries the raw wire string
+        // ("0.27 to 4.20") beside parsed low/high quantities, and the flag is a
+        // v3 ObservationInterpretation coding. Both must stage verbatim; the
+        // parsed low/high must NOT replace the wire text (no recomputation).
+        org.openelisglobal.test.valueholder.Test tsh = org.mockito.Mockito
+                .mock(org.openelisglobal.test.valueholder.Test.class);
+        when(tsh.getId()).thenReturn("77");
+        when(testService.getTestsByLoincCode("11580-8")).thenReturn(List.of(tsh));
+
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-RANGE-1\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"system\":\"http://loinc.org\",\"code\":\"11580-8\"},{\"code\":\"TSH\"}]},"
+                + "\"valueQuantity\":{\"value\":2.31,\"unit\":\"uIU/mL\"},"
+                + "\"referenceRange\":[{\"text\":\"0.27 to 4.20\","
+                + "\"low\":{\"value\":0.27,\"unit\":\"uIU/mL\"},\"high\":{\"value\":4.20,\"unit\":\"uIU/mL\"}}],"
+                + "\"interpretation\":[{\"coding\":[{"
+                + "\"system\":\"http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation\","
+                + "\"code\":\"N\",\"display\":\"Normal\"}]}]}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertEquals("wire range text must stage verbatim, not a recomputed low-high form",
+                "0.27 to 4.20", staged.getReferenceRange());
+        org.junit.Assert.assertEquals("N", staged.getAbnormalFlag());
+        org.junit.Assert.assertEquals("mapped row must still resolve by LOINC", "77", staged.getTestId());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_SnibeHl7FallbackHighAndLowFlags_StagedPerRow() throws Exception {
+        // LIS-97: the SNIBE HL7 fallback shape (OBX-7/OBX-8 → same bridge FHIR
+        // form, LIS-176) with abnormal H and L flags on separate observations.
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-HL7-1\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"FT4\"}]},"
+                + "\"valueQuantity\":{\"value\":28.8,\"unit\":\"pmol/L\"},"
+                + "\"referenceRange\":[{\"text\":\"12 to 22\"}]," + "\"interpretation\":[{\"coding\":[{"
+                + "\"system\":\"http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation\","
+                + "\"code\":\"H\",\"display\":\"High\"}]}]}}," + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"TSH\"}]},"
+                + "\"valueQuantity\":{\"value\":0.05,\"unit\":\"uIU/mL\"},"
+                + "\"referenceRange\":[{\"text\":\"0.27 to 4.20\"}]," + "\"interpretation\":[{\"coding\":[{"
+                + "\"system\":\"http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation\","
+                + "\"code\":\"L\",\"display\":\"Low\"}]}]}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(2));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        List<AnalyzerResults> inserted = (List<AnalyzerResults>) captor.getValue();
+        org.junit.Assert.assertEquals("12 to 22", inserted.get(0).getReferenceRange());
+        org.junit.Assert.assertEquals("H", inserted.get(0).getAbnormalFlag());
+        org.junit.Assert.assertEquals("0.27 to 4.20", inserted.get(1).getReferenceRange());
+        org.junit.Assert.assertEquals("L", inserted.get(1).getAbnormalFlag());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_NonStandardTextualFlagOnUnmappedAnalyte_CarriedVerbatim() throws Exception {
+        // LIS-97: a wire flag without a v3 counterpart arrives as
+        // interpretation.text (never dropped, LIS-119) and must stage verbatim —
+        // including on an UNMAPPED analyte, whose read-only staging row is the
+        // technician's only view of the analyzer evidence.
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-TXT-1\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"HBSAG\"}]},"
+                + "\"valueQuantity\":{\"value\":0.35,\"unit\":\"COI\"},"
+                + "\"referenceRange\":[{\"text\":\"<1.0 negative\"}]," + "\"interpretation\":[{\"text\":\"SUSP\"}]}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertTrue("unmapped analyte stages read-only", staged.isReadOnly());
+        org.junit.Assert.assertEquals("<1.0 negative", staged.getReferenceRange());
+        org.junit.Assert.assertEquals("SUSP", staged.getAbnormalFlag());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_NoRangeOrInterpretation_StagesWithNulls() throws Exception {
+        // LIS-97 backward compatibility: observations without range/flag (all
+        // pre-LIS-119 senders, and analytes the analyzer sends bare) must stage
+        // exactly as before — null evidence, no import failure.
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-BARE-1\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\"}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertNull("absent referenceRange must stay null", staged.getReferenceRange());
+        org.junit.Assert.assertNull("absent interpretation must stay null", staged.getAbnormalFlag());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_RangeWithoutText_ComposedFromLowHigh() throws Exception {
+        // Robustness for non-bridge senders: a numeric-only referenceRange
+        // (no text) still yields a displayable low-high form.
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-LOHI-1\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"FT4\"}]},"
+                + "\"valueQuantity\":{\"value\":14.8,\"unit\":\"pmol/L\"},"
+                + "\"referenceRange\":[{\"low\":{\"value\":12},\"high\":{\"value\":22}}]}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        org.junit.Assert.assertEquals("12-22", ((AnalyzerResults) captor.getValue().get(0)).getReferenceRange());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void importFhirBundle_LongRangeAndFlag_PreservesCompleteAnalyzerEvidence() throws Exception {
+        // LIS-97: range/flag are analyzer evidence, so the complete wire value must
+        // survive import. In particular, the suffix beyond the old VARCHAR(80/40)
+        // limits is durable evidence and may not be replaced by a log message.
+        String overlongRange = "Analyzer reference range: " + "r".repeat(90) + "::RANGE-END";
+        String overlongFlag = "Analyzer interpretation: " + "f".repeat(50) + "::FLAG-END";
+        String bundleJson = "{" + "\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":["
+                + "{\"fullUrl\":\"urn:uuid:specimen-1\",\"resource\":{"
+                + "\"resourceType\":\"Specimen\",\"identifier\":[{\"value\":\"X3-LONG-1\"}]}},"
+                + "{\"resource\":{\"resourceType\":\"Observation\","
+                + "\"specimen\":{\"reference\":\"urn:uuid:specimen-1\"},"
+                + "\"code\":{\"coding\":[{\"code\":\"WBC\"}]},\"valueString\":\"7.5\","
+                + "\"referenceRange\":[{\"text\":\"" + overlongRange + "\"}]," + "\"interpretation\":[{\"text\":\""
+                + overlongFlag + "\"}]}}]}";
+
+        mockMvc.perform(post("/analyzer/fhir").contentType(MediaType.APPLICATION_JSON).content(bundleJson))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.resultsInserted").value(1));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(analyzerResultsService).insertAnalyzerResults(captor.capture(), eq("1"));
+        AnalyzerResults staged = (AnalyzerResults) captor.getValue().get(0);
+        org.junit.Assert.assertEquals(overlongRange, staged.getReferenceRange());
+        org.junit.Assert.assertTrue(staged.getReferenceRange().endsWith("::RANGE-END"));
+        org.junit.Assert.assertEquals(overlongFlag, staged.getAbnormalFlag());
+        org.junit.Assert.assertTrue(staged.getAbnormalFlag().endsWith("::FLAG-END"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     public void importFhirBundle_SkewedAnalyzerClock_FlagsClockSkewWithoutBlocking() throws Exception {
         // LIS-271: the real MAGLUMI X3 bench clock was found ~16 months wrong. A
         // syntactically valid but implausible effectiveDateTime never trips the

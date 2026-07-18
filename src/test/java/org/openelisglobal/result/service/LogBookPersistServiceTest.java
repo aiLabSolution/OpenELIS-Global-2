@@ -2,6 +2,7 @@ package org.openelisglobal.result.service;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -158,6 +159,21 @@ public class LogBookPersistServiceTest extends BaseWebContextSensitiveTest {
 
         TestResultItem testResultItem = getTestResultItem();
 
+        // Model a previously accepted analyzer result. A routine manual/logbook
+        // value edit must not leave this evidence attached to the replacement
+        // value, because the current row is what the supported FHIR path exports.
+        Result analyzerResult = testResultItem.getResult();
+        analyzerResult.setReferenceRange("3.5 to 5.1");
+        analyzerResult.setAbnormalFlag("H");
+        resultService.update(analyzerResult);
+
+        Result persistedAnalyzerResult = new Result();
+        persistedAnalyzerResult.setId(analyzerResult.getId());
+        resultService.getData(persistedAnalyzerResult);
+        assertEquals("same-value load must preserve analyzer range", "3.5 to 5.1",
+                persistedAnalyzerResult.getReferenceRange());
+        assertEquals("same-value load must preserve analyzer flag", "H", persistedAnalyzerResult.getAbnormalFlag());
+
         ResultSaveBean saveBean = new ResultSaveBean();
         saveBean.setResultType(testResultItem.getResultType());
         saveBean.setResultValue(testResultItem.getResultValue());
@@ -193,6 +209,8 @@ public class LogBookPersistServiceTest extends BaseWebContextSensitiveTest {
         List<Result> savedResults = resultService.getAll();
         assertEquals("6.8", savedResults.get(0).getValue());
         assertEquals("N", savedResults.get(0).getResultType());
+        assertNull("manual value replacement must clear stale analyzer range", savedResults.get(0).getReferenceRange());
+        assertNull("manual value replacement must clear stale analyzer flag", savedResults.get(0).getAbnormalFlag());
         assertFalse("Results should be persisted", savedResults.isEmpty());
 
     }

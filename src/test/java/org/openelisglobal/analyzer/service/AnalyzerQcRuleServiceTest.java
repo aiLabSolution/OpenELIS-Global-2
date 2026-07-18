@@ -169,6 +169,29 @@ public class AnalyzerQcRuleServiceTest {
         service.createRule("999", rule, "1");
     }
 
+    @Test
+    public void testCreateRule_WithCalibrationSpecimenIdPrefixRule_PersistsAsAnalyzerQcRule() {
+        // LIS-173: a CALIBRATION_SPECIMEN_ID_PREFIX rule persists as an
+        // AnalyzerQcRule — proves the calibration path is no longer inert.
+        Analyzer analyzer = new Analyzer();
+        analyzer.setId("1");
+        when(analyzerService.get("1")).thenReturn(analyzer);
+        when(analyzerQcRuleDAO.findByAnalyzerId("1")).thenReturn(List.of());
+
+        AnalyzerQcRule newRule = new AnalyzerQcRule();
+        newRule.setRuleType(RuleType.CALIBRATION_SPECIMEN_ID_PREFIX);
+        newRule.setOperand("CAL-");
+        newRule.setActive(true);
+        newRule.setDescription("PROVISIONAL placeholder — no confirmed calibration Sample-ID convention (LIS-266)");
+
+        AnalyzerQcRule created = service.createRule("1", newRule, "1");
+
+        assertEquals("1", created.getAnalyzerId());
+        assertEquals(RuleType.CALIBRATION_SPECIMEN_ID_PREFIX, created.getRuleType());
+        assertEquals("CAL-", created.getOperand());
+        assertEquals(true, created.isActive());
+    }
+
     @Test(expected = IllegalStateException.class)
     public void testCreateRule_ExceedingMaxRulesLimit_ThrowsIllegalStateException() {
         Analyzer analyzer = new Analyzer();
@@ -261,6 +284,68 @@ public class AnalyzerQcRuleServiceTest {
         rule.setRuleType(RuleType.SPECIMEN_ID_PATTERN);
         rule.setOperand("^(QC|CTRL)-[A-Z]{2}\\d{3,5}$");
         service.validateRule(rule); // no exception
+    }
+
+    // ---- validateRule: CALIBRATION_* (LIS-173) ----
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testValidateRule_CalibrationFieldEquals_NullTargetField_Throws() {
+        AnalyzerQcRule rule = new AnalyzerQcRule();
+        rule.setRuleType(RuleType.CALIBRATION_FIELD_EQUALS);
+        rule.setOperand("1");
+        service.validateRule(rule);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testValidateRule_CalibrationFieldContains_BlankTargetField_Throws() {
+        AnalyzerQcRule rule = new AnalyzerQcRule();
+        rule.setRuleType(RuleType.CALIBRATION_FIELD_CONTAINS);
+        rule.setTargetField("  ");
+        rule.setOperand("CAL");
+        service.validateRule(rule);
+    }
+
+    @Test
+    public void testValidateRule_CalibrationSpecimenIdPrefix_NullTargetField_Succeeds() {
+        AnalyzerQcRule rule = new AnalyzerQcRule();
+        rule.setRuleType(RuleType.CALIBRATION_SPECIMEN_ID_PREFIX);
+        rule.setOperand("CAL-");
+        service.validateRule(rule); // no exception
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testValidateRule_CalibrationSpecimenIdPattern_InvalidRegex_Throws() {
+        AnalyzerQcRule rule = new AnalyzerQcRule();
+        rule.setRuleType(RuleType.CALIBRATION_SPECIMEN_ID_PATTERN);
+        rule.setOperand("[invalid(");
+        service.validateRule(rule);
+    }
+
+    @Test
+    public void testValidateRule_CalibrationSpecimenIdPattern_ValidRegex_Succeeds() {
+        AnalyzerQcRule rule = new AnalyzerQcRule();
+        rule.setRuleType(RuleType.CALIBRATION_SPECIMEN_ID_PATTERN);
+        rule.setOperand("^CAL-\\d{4}$");
+        service.validateRule(rule); // no exception
+    }
+
+    /**
+     * LIS-173: before this change, RuleType.valueOf("CALIBRATION_...") threw
+     * IllegalArgumentException at the REST boundary
+     * (AnalyzerQcRuleRestController#mapToRule and
+     * AnalyzerServiceImpl#createQcRulesFromProfile both call
+     * RuleType.valueOf(String) directly on the incoming ruleType string). Confirm
+     * all four new values now round-trip through valueOf()/name() without throwing,
+     * for every value the CHECK constraint (chk_qc_rule_type, liquibase 004-014)
+     * now accepts.
+     */
+    @Test
+    public void testRuleTypeValueOf_CalibrationValues_NoLongerRejectedAtRestBoundary() {
+        for (String name : new String[] { "CALIBRATION_FIELD_EQUALS", "CALIBRATION_FIELD_CONTAINS",
+                "CALIBRATION_SPECIMEN_ID_PREFIX", "CALIBRATION_SPECIMEN_ID_PATTERN" }) {
+            RuleType type = RuleType.valueOf(name);
+            assertEquals(name, type.name());
+        }
     }
 
     // ---- updateRule ----
@@ -360,5 +445,22 @@ public class AnalyzerQcRuleServiceTest {
         List<QcRuleDto> dtos = service.getActiveRuleDtosForAnalyzer("2");
 
         assertEquals(0, dtos.size());
+    }
+
+    @Test
+    public void testGetActiveRuleDtosForAnalyzer_WithCalibrationRule_PushesCalibrationType() {
+        // LIS-173: the pushed QcRuleDto must carry the CALIBRATION_* type end to
+        // end — this is what makes the bridge/edge-sim Kind.CALIBRATION path
+        // (LIS-125) reachable instead of structurally inert.
+        AnalyzerQcRule calibrationRule = createRule("rule-005", "1", RuleType.CALIBRATION_SPECIMEN_ID_PREFIX, null,
+                "CAL-", true, 5);
+        when(analyzerQcRuleDAO.findActiveByAnalyzerId("1")).thenReturn(List.of(calibrationRule));
+
+        List<QcRuleDto> dtos = service.getActiveRuleDtosForAnalyzer("1");
+
+        assertEquals(1, dtos.size());
+        assertEquals("CALIBRATION_SPECIMEN_ID_PREFIX", dtos.get(0).ruleType());
+        assertNull(dtos.get(0).targetField());
+        assertEquals("CAL-", dtos.get(0).operand());
     }
 }

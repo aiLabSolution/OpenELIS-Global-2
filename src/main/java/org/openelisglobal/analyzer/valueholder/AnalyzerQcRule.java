@@ -18,7 +18,17 @@ public class AnalyzerQcRule extends BaseObject<String> {
     private static final long serialVersionUID = 1L;
 
     public enum RuleType {
-        FIELD_EQUALS, SPECIMEN_ID_PREFIX, SPECIMEN_ID_PATTERN, FIELD_CONTAINS
+        FIELD_EQUALS, SPECIMEN_ID_PREFIX, SPECIMEN_ID_PATTERN, FIELD_CONTAINS,
+        // LIS-173: calibration-classification counterparts. OE only ever *pushes*
+        // these (no OE-side routing consumes RuleType) — the bridge/edge-sim
+        // Kind.CALIBRATION path is what actually acts on a CALIBRATION_* match.
+        // The only shipped CALIBRATION_* rule (snibe-maglumi-x3 profile) is a
+        // deliberately-INACTIVE placeholder: the concrete per-analyzer calibration
+        // convention is unconfirmed pending a chassis-attached capture (LIS-266).
+        // Provisioning one of these values does not by itself prove any analyzer's
+        // real calibration discriminator.
+        CALIBRATION_FIELD_EQUALS, CALIBRATION_FIELD_CONTAINS, CALIBRATION_SPECIMEN_ID_PREFIX,
+        CALIBRATION_SPECIMEN_ID_PATTERN
     }
 
     @Id
@@ -30,7 +40,7 @@ public class AnalyzerQcRule extends BaseObject<String> {
     private String analyzerId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "rule_type", nullable = false, length = 30)
+    @Column(name = "rule_type", nullable = false, length = 40)
     private RuleType ruleType;
 
     @Column(name = "target_field", length = 100)

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!--
+        LIS-173: make a calibration rule expressible in analyzer_qc_rule.
+
+        AnalyzerQcRule.RuleType gains four CALIBRATION_* counterparts to the
+        existing QC rule types (CALIBRATION_FIELD_EQUALS, CALIBRATION_FIELD_CONTAINS,
+        CALIBRATION_SPECIMEN_ID_PREFIX, CALIBRATION_SPECIMEN_ID_PATTERN), so the
+        Kind.CALIBRATION path already delivered by LIS-125 in the bridge/edge-sim
+        has something to match against. Widen rule_type past the old VARCHAR(30)
+        (CALIBRATION_SPECIMEN_ID_PATTERN is 31 chars) and extend the CHECK
+        constraint to accept the new values.
+
+        This changeset makes the calibration rule *expressible*, not *proven*:
+        the only shipped CALIBRATION_* rule (snibe-maglumi-x3 profile) is a
+        deliberately-inactive placeholder. The concrete per-analyzer calibration
+        Sample-ID/field convention (e.g. for the MAGLUMI X3) is still unconfirmed
+        pending a chassis-attached capture (LIS-266).
+    -->
+    <changeSet id="analyzer-014-widen-qc-rule-type-column" author="lis-173-calibration-rule-types">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="analyzer_qc_rule" columnName="rule_type"/>
+            <sqlCheck expectedResult="30">
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = 'clinlims'
+                AND table_name = 'analyzer_qc_rule'
+                AND column_name = 'rule_type'
+            </sqlCheck>
+        </preConditions>
+        <comment>LIS-173: widen analyzer_qc_rule.rule_type to fit CALIBRATION_* values</comment>
+        <modifyDataType tableName="analyzer_qc_rule" columnName="rule_type" newDataType="VARCHAR(40)"/>
+        <rollback>
+            <!-- Fail-loud by design once CALIBRATION_* rows exist: narrowing to
+                 VARCHAR(30) errors on the 31-char CALIBRATION_SPECIMEN_ID_PATTERN
+                 value (verified on postgres:14.4). Disposition (delete or convert)
+                 any CALIBRATION_* rows before rolling back; runInTransaction keeps
+                 the failed rollback side-effect-free. -->
+            <modifyDataType tableName="analyzer_qc_rule" columnName="rule_type" newDataType="VARCHAR(30)"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="analyzer-014-widen-qc-rule-type-check-constraint" author="lis-173-calibration-rule-types">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="analyzer_qc_rule"/>
+            <sqlCheck expectedResult="1">
+                SELECT COUNT(*) FROM information_schema.check_constraints
+                WHERE constraint_schema = 'clinlims'
+                AND constraint_name = 'chk_qc_rule_type'
+            </sqlCheck>
+        </preConditions>
+        <comment>LIS-173: allow CALIBRATION_* rule_type values through chk_qc_rule_type</comment>
+        <sql>
+            ALTER TABLE analyzer_qc_rule DROP CONSTRAINT chk_qc_rule_type;
+            ALTER TABLE analyzer_qc_rule
+            ADD CONSTRAINT chk_qc_rule_type
+            CHECK (rule_type IN (
+                'FIELD_EQUALS', 'SPECIMEN_ID_PREFIX', 'SPECIMEN_ID_PATTERN', 'FIELD_CONTAINS',
+                'CALIBRATION_FIELD_EQUALS', 'CALIBRATION_FIELD_CONTAINS',
+                'CALIBRATION_SPECIMEN_ID_PREFIX', 'CALIBRATION_SPECIMEN_ID_PATTERN'
+            ));
+        </sql>
+        <rollback>
+            <!-- Fail-loud by design once CALIBRATION_* rows exist: re-adding the
+                 4-value CHECK errors while such rows are present (verified on
+                 postgres:14.4). Disposition the rows first; the transactional
+                 rollback leaves no drop-without-readd half-state. -->
+            <sql>
+                ALTER TABLE analyzer_qc_rule DROP CONSTRAINT chk_qc_rule_type;
+                ALTER TABLE analyzer_qc_rule
+                ADD CONSTRAINT chk_qc_rule_type
+                CHECK (rule_type IN ('FIELD_EQUALS', 'SPECIMEN_ID_PREFIX', 'SPECIMEN_ID_PATTERN', 'FIELD_CONTAINS'));
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

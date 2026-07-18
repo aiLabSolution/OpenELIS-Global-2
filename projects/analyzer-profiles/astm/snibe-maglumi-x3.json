@@ -1,0 +1,68 @@
+{
+  "$schema": "https://openelis-global.org/schemas/analyzer-defaults/1.0",
+  "profileMeta": {
+    "id": "snibe-maglumi-x3",
+    "version": "0.1.0",
+    "displayName": "SNIBE MAGLUMI X3",
+    "manufacturer": "SNIBE (Shenzhen New Industries Biomedical Engineering)",
+    "confidence": "LOW",
+    "status": "DRAFT"
+  },
+  "analyzer_name": "SNIBE MAGLUMI X3",
+  "manufacturer": "SNIBE",
+  "category": "IMMUNOLOGY",
+  "protocol": {
+    "name": "ASTM",
+    "version": "E1394-97"
+  },
+  "identifier_pattern": "(?i)(maglumi|snibe)",
+  "transport": [
+    "TCP/IP"
+  ],
+  "transport_config": {
+    "TCP/IP": {
+      "default_port": 12021,
+      "framing": "SNIBE simplified-envelope (LIS-174 default): ENQ/STX/payload/ETX/EOT, ACK per control token, no NAK/checksum/frame-numbers/LF. Full E1381-95 framing is used instead only if the analyzer's Online-screen 'Enable Checksum' toggle is on — not yet bench-confirmed which mode a real X3 defaults to (LIS-75/LIS-266).",
+      "notes": "Bridge listener bean org.itech.ahb.listen-astm-server.snibe is opt-in (created only when its `port` key is configured) — see edge/drivers configuration.yml. Upload-only: the send/query-response half (LIS-177) is not implemented."
+    }
+  },
+  "communication": {
+    "mode": "ANALYZER_INITIATED",
+    "supports_lis_initiated": false,
+    "notes": "X3 is the TCP client; the bridge is the host (Host ID = 'Lis') per the native Online-interface topology (no SnibeLis middleware on the wire, per the 2026-07-06 owner directive)."
+  },
+  "default_test_mappings": [
+    {
+      "test_code": "TSH",
+      "test_name_hint": "Thyroid Stimulating Hormone",
+      "loinc": "3016-3",
+      "unit": "uIU/mL"
+    },
+    {
+      "test_code": "FT4",
+      "test_name_hint": "Free Thyroxine",
+      "loinc": "14920-3",
+      "unit": "pmol/L"
+    }
+  ],
+  "configDefaults": {
+    "qcRules": [
+      {
+        "ruleType": "FIELD_EQUALS",
+        "targetField": "O.12",
+        "operand": "Q",
+        "isActive": true,
+        "sortOrder": 1,
+        "description": "PROVISIONAL — pending LIS-266 chassis-attached QC capture to confirm the real X3 QC/calibration discriminator; do not treat as wire-proven. Mirrors the bridge's in-repo configuration.yml discriminator (ASTM O-record action code O.12 == 'Q'). No bench capture has ever confirmed the X3 emits an O.12 action code at all: every captured patient O-record to date is O|1|<id>||^^^CODE with ~5 fields, shorter than the field this rule targets. Shipped active (not inactive) because guarded go-live requires QC-provisioning config to be PRESENT before go-live (Pinote 2026-07-19); if the X3 never populates O.12, this rule silently never fires and QC rows fall through to the patient stream undetected — that residual risk is why the operator QC-review SOP (docs/runbooks/x3-qc-guarded-go-live.md) is a REQUIRED compensating control, not optional guidance."
+      },
+      {
+        "ruleType": "CALIBRATION_SPECIMEN_ID_PREFIX",
+        "operand": "CAL-",
+        "isActive": false,
+        "sortOrder": 2,
+        "description": "PROVISIONAL PLACEHOLDER — pending LIS-266 chassis-attached QC capture to confirm the real X3 QC/calibration discriminator; do not treat as wire-proven. No calibration upload and no Sample-ID convention has ever been observed from a real X3 (LIS-173/LIS-38/LIS-75 all still open on this point); the 'CAL-' prefix is an invented placeholder, not a vendor- or bench-confirmed value. Shipped INACTIVE (isActive=false) deliberately: an unconfirmed prefix rule, if active, could silently reclassify a real patient specimen whose accession happens to start with 'CAL-' out of the patient stream. Provisioning it inactive makes the row exist (CALIBRATION_* is now expressible per LIS-173) and reviewable by an admin without it being able to fire on live traffic. An operator/admin must confirm the real convention via LIS-266 bench evidence and explicitly flip this rule active (or replace its operand) before it does anything."
+      }
+    ]
+  },
+  "notes": "GUARDED GO-LIVE scaffold for LIS-269/LIS-173, not a bench-verified profile. Every value in this file that claims to discriminate QC or calibration traffic is PROVISIONAL — pending LIS-266 chassis-attached QC capture to confirm the real X3 QC/calibration discriminator; do not treat as wire-proven. TSH/FT4 code-to-LOINC choices are the same synthetic seeds already carried in the bridge's configuration.yml ('real dictionary = LIS-38'), not a validated vendor dictionary. AFP and CEA are known X3 analytes deliberately left unmapped here (as in the bridge config) pending LIS-38 — do not guess LOINC codes for them. Authoring this profile makes the analyzer_qc_rule / QcRuleDto path provisioned end-to-end (LIS-173) instead of empty, which is what OE's registry full-replace sync (attachQcRules) needs to stop wiping the bridge's QC rules on every sync; it does NOT prove the discriminator is correct on real X3 wire traffic. Until LIS-266 lands, sites running this profile MUST follow the operator QC-review SOP (docs/runbooks/x3-qc-guarded-go-live.md) as the compensating control for QC/calibration misclassification risk."
+}

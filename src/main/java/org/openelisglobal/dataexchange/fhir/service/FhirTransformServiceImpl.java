@@ -2170,7 +2170,42 @@ public class FhirTransformServiceImpl implements FhirTransformService {
         }
         // observation.setIssued(new Date());
 
+        // LIS-97: re-emit the analyzer-provided range/flag evidence preserved at
+        // accept, mirroring the bridge's inbound shape — referenceRange.text
+        // verbatim (never recomputed), interpretation coded against v3
+        // ObservationInterpretation for recognized flags and carried as text
+        // otherwise so no flag is ever dropped. The lab-owned result_limits
+        // range (minNormal/maxNormal) is deliberately NOT emitted here. Routine
+        // manual value changes clear these fields in Result.setValue, so absent
+        // evidence here also prevents stale analyzer context from being exported.
+        if (!GenericValidator.isBlankOrNull(result.getReferenceRange())) {
+            observation.addReferenceRange().setText(result.getReferenceRange());
+        }
+        if (!GenericValidator.isBlankOrNull(result.getAbnormalFlag())) {
+            observation.addInterpretation(toObservationInterpretation(result.getAbnormalFlag()));
+        }
+
         return observation;
+    }
+
+    private static final String V3_INTERPRETATION_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation";
+
+    // Mirrors the analyzer bridge's ABNORMAL_FLAG_TO_V3_DISPLAY (LIS-119): only
+    // flags with a faithful v3 ObservationInterpretation counterpart are coded;
+    // anything else round-trips as interpretation.text.
+    private static final java.util.Map<String, String> ABNORMAL_FLAG_TO_V3_DISPLAY = java.util.Map.ofEntries(
+            java.util.Map.entry("N", "Normal"), java.util.Map.entry("L", "Low"), java.util.Map.entry("H", "High"),
+            java.util.Map.entry("LL", "Critical low"), java.util.Map.entry("HH", "Critical high"),
+            java.util.Map.entry("A", "Abnormal"), java.util.Map.entry("AA", "Critical abnormal"),
+            java.util.Map.entry("<", "Off scale low"), java.util.Map.entry(">", "Off scale high"));
+
+    private CodeableConcept toObservationInterpretation(String abnormalFlag) {
+        String canonical = abnormalFlag.toUpperCase(java.util.Locale.ROOT);
+        String display = ABNORMAL_FLAG_TO_V3_DISPLAY.get(canonical);
+        if (display != null) {
+            return new CodeableConcept().addCoding(new Coding(V3_INTERPRETATION_SYSTEM, canonical, display));
+        }
+        return new CodeableConcept().setText(abnormalFlag);
     }
 
     @Override
