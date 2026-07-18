@@ -11,6 +11,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +81,14 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
     private static final String ANALYZER_PATIENT_ID_SYSTEM = "http://openelis-global.org/fhir/analyzer-patient-id";
     private static final String LOINC_SYSTEM = "http://loinc.org";
     private static final String UCUM_SYSTEM = "http://unitsofmeasure.org";
+    // LIS-271: an analyzer's onboard clock can be badly wrong (the real MAGLUMI
+    // X3 bench clock was ~16 months off) yet still be a syntactically valid
+    // timestamp, so it never trips the existing parse-exception fallback. A gap
+    // this large between the analyzer-reported time and OE's own receive time is
+    // flagged for review — QA-approved policy (Pinote) is non-blocking: flag +
+    // record both timestamps, never hold or reject on skew alone.
+    private static final long CLOCK_SKEW_THRESHOLD_MILLIS = 24L * 60 * 60 * 1000;
+    private static final String CLOCK_SKEW_ISSUE_REASON = "clock-skew";
 
     @Autowired
     private AnalyzerResultsService analyzerResultsService;
@@ -409,6 +418,20 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
     }
 
     /**
+     * Add a reason to the staged row's import_issue_reason instead of clobbering
+     * whatever is already there — an unmapped test AND a skewed analyzer clock can
+     * both be true of the same Observation, and both need to survive to the
+     * import-issues dashboard. Comma-joined and re-truncated to the column width
+     * (LIS-244 pattern) so an accumulation of reasons can never fail the insert.
+     */
+    private static void appendImportIssueReason(AnalyzerResults ar, String reason) {
+        String existing = ar.getImportIssueReason();
+        String combined = (existing == null || existing.isBlank()) ? reason : existing + "," + reason;
+        ar.setImportIssueReason(truncateForStaging(combined, AnalyzerResults.IMPORT_ISSUE_REASON_MAX_LENGTH,
+                "import_issue_reason", ar.getAccessionNumber()));
+    }
+
+    /**
      * An identity-bearing wire value exceeds its staging column width — the bundle
      * must be rejected with a 400 naming the field, not truncated (truncation would
      * change matching semantics) and not left to fail the insert (a 500 the bridge
@@ -528,9 +551,7 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             } else {
                 ar.setTestName(testCode);
                 ar.setReadOnly(true);
-                ar.setImportIssueReason(
-                        truncateForStaging("unmapped_loinc:" + testCode, AnalyzerResults.IMPORT_ISSUE_REASON_MAX_LENGTH,
-                                "import_issue_reason", ar.getAccessionNumber()));
+                appendImportIssueReason(ar, "unmapped_loinc:" + testCode);
             }
         }
 
@@ -605,15 +626,40 @@ public class AnalyzerFhirImportController extends org.openelisglobal.common.rest
             }
         }
 
-        // Completion timestamp from effectiveDateTime
+        // Completion timestamp from effectiveDateTime — completeDate keeps trusting
+        // the analyzer's onboard clock verbatim, exactly as before (LIS-128's
+        // cross-day correction guard and the clinical completion time both key
+        // off it; this slice does not change accept/hold behavior). importReceivedTime
+        // records OE's own wall clock at the moment of processing, independent of
+        // what the analyzer reported, so the row stays truthful about provenance
+        // regardless of clock skew (LIS-271).
+        Timestamp importReceivedTime = new Timestamp(System.currentTimeMillis());
+        ar.setImportReceivedTime(importReceivedTime);
+        Date analyzerReportedTime = null;
         if (obs.hasEffectiveDateTimeType()) {
             try {
-                ar.setCompleteDate(new Timestamp(obs.getEffectiveDateTimeType().getValue().getTime()));
+                analyzerReportedTime = obs.getEffectiveDateTimeType().getValue();
+                ar.setCompleteDate(new Timestamp(analyzerReportedTime.getTime()));
             } catch (Exception e) {
-                ar.setCompleteDate(new Timestamp(System.currentTimeMillis()));
+                ar.setCompleteDate(importReceivedTime);
             }
         } else {
-            ar.setCompleteDate(new Timestamp(System.currentTimeMillis()));
+            ar.setCompleteDate(importReceivedTime);
+        }
+
+        // Flag (never block) an implausible gap between the two clocks. A
+        // syntactically valid-but-wrong analyzer timestamp never trips the
+        // parse-exception fallback above, so this is the only place a bad
+        // analyzer clock becomes visible.
+        if (analyzerReportedTime != null) {
+            long skewMillis = Math.abs(importReceivedTime.getTime() - analyzerReportedTime.getTime());
+            if (skewMillis > CLOCK_SKEW_THRESHOLD_MILLIS) {
+                LogEvent.logWarn(CLASS_NAME, "mapObservationToAnalyzerResult",
+                        "Analyzer-reported completion time is " + skewMillis
+                                + "ms from import receive time (> 24h threshold) for accession="
+                                + ar.getAccessionNumber() + " — flagging clock-skew, not blocking (LIS-271)");
+                appendImportIssueReason(ar, CLOCK_SKEW_ISSUE_REASON);
+            }
         }
 
         // testId is set by the mapping lookup above; if unmapped, it stays null

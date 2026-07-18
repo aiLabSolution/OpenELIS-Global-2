@@ -181,4 +181,7 @@
   <!-- LIS-239: carry the bridge's wire patient identity into analyzer staging so same-day two-patient collisions under a shared/reused accession block USE at accept. 057 = LIS-54 (merged), 058 = LIS-111. -->
   <include relativeToChangelogFile="true" file="059-analyzer-results-patient-hint.xml"/>
 
+  <!-- LIS-271: record OE's own receive-time clock alongside complete_date (which stays derived from the analyzer's onboard clock, unchanged) so a wrong analyzer clock is provable, not just inferable. 060 reserved by open LIS-97 PR #49 — skipped, not reused. -->
+  <include relativeToChangelogFile="true" file="061-analyzer-results-import-received-time.xml"/>
+
 </databaseChangeLog>
