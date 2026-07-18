@@ -36,6 +36,11 @@
         <comment>LIS-173: widen analyzer_qc_rule.rule_type to fit CALIBRATION_* values</comment>
         <modifyDataType tableName="analyzer_qc_rule" columnName="rule_type" newDataType="VARCHAR(40)"/>
         <rollback>
+            <!-- Fail-loud by design once CALIBRATION_* rows exist: narrowing to
+                 VARCHAR(30) errors on the 31-char CALIBRATION_SPECIMEN_ID_PATTERN
+                 value (verified on postgres:14.4). Disposition (delete or convert)
+                 any CALIBRATION_* rows before rolling back; runInTransaction keeps
+                 the failed rollback side-effect-free. -->
             <modifyDataType tableName="analyzer_qc_rule" columnName="rule_type" newDataType="VARCHAR(30)"/>
         </rollback>
     </changeSet>
@@ -61,6 +66,10 @@
             ));
         </sql>
         <rollback>
+            <!-- Fail-loud by design once CALIBRATION_* rows exist: re-adding the
+                 4-value CHECK errors while such rows are present (verified on
+                 postgres:14.4). Disposition the rows first; the transactional
+                 rollback leaves no drop-without-readd half-state. -->
             <sql>
                 ALTER TABLE analyzer_qc_rule DROP CONSTRAINT chk_qc_rule_type;
                 ALTER TABLE analyzer_qc_rule

@@ -136,6 +136,29 @@ public class AnalyzerServiceProfileQcRulesTest {
     }
 
     @Test
+    public void testAutoCreateTestMappings_WithInactiveCalibrationRuleInProfile_SeedsItInactive() {
+        // The safety property of the shipped snibe-maglumi-x3 placeholder: a profile
+        // rule with isActive:false must seed with active=false, so the active-only
+        // push filter keeps it off the bridge. A truthiness regression here would
+        // ship an unverified CAL- rule ACTIVE to the bridge with nothing red.
+        Map<String, Object> inactiveRule = Map.of("ruleType", "CALIBRATION_SPECIMEN_ID_PREFIX", "operand", "CAL-",
+                "isActive", false, "sortOrder", 1);
+        Map<String, Object> configDefaults = new HashMap<>();
+        configDefaults.put("qcRules", List.of(inactiveRule));
+        Map<String, Object> config = new HashMap<>();
+        config.put("configDefaults", configDefaults);
+
+        when(analyzerQcRuleService.createRule(anyString(), any(AnalyzerQcRule.class), anyString()))
+                .thenAnswer(inv -> inv.getArgument(1));
+
+        analyzerService.autoCreateTestMappings("1", config, "1");
+
+        ArgumentCaptor<AnalyzerQcRule> ruleCaptor = ArgumentCaptor.forClass(AnalyzerQcRule.class);
+        verify(analyzerQcRuleService, times(1)).createRule(eq("1"), ruleCaptor.capture(), eq("1"));
+        assertEquals(false, ruleCaptor.getValue().isActive());
+    }
+
+    @Test
     public void testAutoCreateTestMappings_WithNullRuleType_SkipsRule() {
         Map<String, Object> badRule = new HashMap<>();
         badRule.put("ruleType", null);
