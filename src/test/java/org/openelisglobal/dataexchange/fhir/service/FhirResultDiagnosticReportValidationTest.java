@@ -159,6 +159,75 @@ public class FhirResultDiagnosticReportValidationTest {
         assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
     }
 
+    @Test
+    public void resultWithAnalyzerRangeAndCodedFlag_emitsReferenceRangeTextAndV3Interpretation() {
+        // LIS-97: analyzer evidence preserved at accept re-emits on the FHIR
+        // read path in the bridge's inbound shape — verbatim referenceRange.text
+        // (never recomputed) and a v3 ObservationInterpretation coding.
+        FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
+        when(fixture.result.getReferenceRange()).thenReturn("0.27 to 4.20");
+        when(fixture.result.getAbnormalFlag()).thenReturn("H");
+
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(fixture.analysis);
+
+        assertEquals("0.27 to 4.20", observation.getReferenceRangeFirstRep().getText());
+        assertEquals("http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                observation.getInterpretationFirstRep().getCodingFirstRep().getSystem());
+        assertEquals("H", observation.getInterpretationFirstRep().getCodingFirstRep().getCode());
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+    }
+
+    @Test
+    public void resultWithLongAnalyzerEvidence_emitsCompleteSuffixWithoutTruncation() {
+        FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
+        String longRange = "Analyzer reference range: " + "r".repeat(90) + "::RANGE-END";
+        String longFlag = "Analyzer interpretation: " + "f".repeat(50) + "::FLAG-END";
+        when(fixture.result.getReferenceRange()).thenReturn(longRange);
+        when(fixture.result.getAbnormalFlag()).thenReturn(longFlag);
+
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+
+        assertEquals(longRange, observation.getReferenceRangeFirstRep().getText());
+        assertTrue(observation.getReferenceRangeFirstRep().getText().endsWith("::RANGE-END"));
+        assertEquals(longFlag, observation.getInterpretationFirstRep().getText());
+        assertTrue(observation.getInterpretationFirstRep().getText().endsWith("::FLAG-END"));
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+    }
+
+    @Test
+    public void resultWithNonStandardFlag_emitsInterpretationTextOnly() {
+        // A wire flag without a v3 counterpart round-trips as interpretation
+        // text — never dropped, never force-coded (mirrors the bridge, LIS-119).
+        FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
+        when(fixture.result.getAbnormalFlag()).thenReturn("SUSP");
+
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(fixture.analysis);
+
+        assertFalse(observation.getInterpretationFirstRep().hasCoding());
+        assertEquals("SUSP", observation.getInterpretationFirstRep().getText());
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+    }
+
+    @Test
+    public void resultWithoutAnalyzerEvidence_emitsNoReferenceRangeOrInterpretation() {
+        // LIS-97 current-row semantics: results with no analyzer evidence
+        // (manual entry, pre-LIS-97 accepts, or a manual value edit whose setter
+        // cleared stale analyzer context) emit neither element.
+        FhirResultFixture fixture = fixture("Hemoglobin", "718-7", List.of());
+
+        Observation observation = fhirTransformService.transformResultToObservation(fixture.result);
+        DiagnosticReport diagnosticReport = fhirTransformService.transformResultToDiagnosticReport(fixture.analysis);
+
+        assertFalse(observation.hasReferenceRange());
+        assertFalse(observation.hasInterpretation());
+        assertNoFhirErrors("Observation", fhirValidator.validateWithResult(observation));
+        assertNoFhirErrors("DiagnosticReport", fhirValidator.validateWithResult(diagnosticReport));
+    }
+
     private static void assertNoFhirErrors(String label, ValidationResult validationResult) {
         List<SingleValidationMessage> errors = validationResult.getMessages().stream()
                 .filter(message -> message.getSeverity() == ResultSeverityEnum.ERROR

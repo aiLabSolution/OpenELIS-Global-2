@@ -87,11 +87,14 @@ public class ResultServiceTest extends BaseWebContextSensitiveTest {
 
     @Test
     public void getData_shouldReturnResultData() {
-        Result result = resultService.get("3");
+        Result result = new Result();
+        result.setId("3");
         resultService.getData(result);
         assertNotNull(result);
         assertEquals("3", result.getId());
         assertEquals("85.0", result.getValue());
+        assertEquals("70-100 mg/dL", result.getReferenceRange());
+        assertEquals("N", result.getAbnormalFlag());
 
     }
 
@@ -106,21 +109,25 @@ public class ResultServiceTest extends BaseWebContextSensitiveTest {
 
     @Test
     public void getResultByAnalysisAndAnalyte_shouldReturnResultForAnalysisAndAnalyte() {
-        Result result = resultService.get("3");
+        Result result = new Result();
         Analysis analysis = analysisService.get("1");
         TestAnalyte testAnalyte = testAnalyteService.get("1");
         resultService.getResultByAnalysisAndAnalyte(result, analysis, testAnalyte);
         assertNotNull(result);
         assertEquals("3", result.getId());
+        assertEquals("70-100 mg/dL", result.getReferenceRange());
+        assertEquals("N", result.getAbnormalFlag());
     }
 
     @Test
     public void getResultByTestResult_shouldReturnResultForTestResult() {
-        Result result = resultService.get("3");
+        Result result = new Result();
         TestResult testResult = testResultService.get("1");
         resultService.getResultByTestResult(result, testResult);
         assertNotNull(result);
         assertEquals("3", result.getId());
+        assertEquals("70-100 mg/dL", result.getReferenceRange());
+        assertEquals("N", result.getAbnormalFlag());
     }
 
     @Test
@@ -146,6 +153,8 @@ public class ResultServiceTest extends BaseWebContextSensitiveTest {
         assertNotNull(result);
         assertEquals("3", result.getId());
         assertEquals("85.0", result.getValue());
+        assertEquals("70-100 mg/dL", result.getReferenceRange());
+        assertEquals("N", result.getAbnormalFlag());
     }
 
     @Test

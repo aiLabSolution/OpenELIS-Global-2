@@ -98,6 +98,14 @@ const AnalyserResults = (props) => {
       width: "15rem",
     },
     {
+      id: "analyzerRange",
+      name: intl.formatMessage({ id: "column.name.analyzerRange" }),
+      cell: (row, index, column, id) => {
+        return renderCell(row, index, column, id);
+      },
+      width: "9rem",
+    },
+    {
       id: "completeDate",
       name: intl.formatMessage({ id: "column.name.testDate" }),
       selector: (row) => row.completeDate,
@@ -345,6 +353,30 @@ const AnalyserResults = (props) => {
             {row.testName}
           </div>
         );
+
+      case "analyzerRange": {
+        // Analyzer-provided reference range and abnormal flag, verbatim wire
+        // evidence (LIS-97) — shown for mapped and unmapped rows alike, and
+        // distinct from the lab-owned range applied at accept.
+        if (!row.referenceRange && !row.abnormalFlag) {
+          return (
+            <div className="sampleInfo" data-testid="analyzerRange">
+              {intl.formatMessage({ id: "not.available" })}
+            </div>
+          );
+        }
+        const isNormalFlag = (row.abnormalFlag || "").toUpperCase() === "N";
+        return (
+          <div className="sampleInfo" data-testid="analyzerRange">
+            {row.referenceRange && <div>{row.referenceRange}</div>}
+            {row.abnormalFlag && (
+              <Tag type={isNormalFlag ? "green" : "red"} size="sm">
+                {row.abnormalFlag}
+              </Tag>
+            )}
+          </div>
+        );
+      }
 
       case "save":
         return (

@@ -46,6 +46,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
  */
 public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensitiveTest {
 
+    private static final String LONG_ANALYZER_RANGE = "Analyzer-provided reference range text whose clinically relevant qualifier extends well beyond eighty characters :: RANGE-END";
+    private static final String LONG_ANALYZER_FLAG = "Analyzer-provided non-standard interpretation whose suffix must survive :: FLAG-END";
+
     @Autowired
     private AnalyzerResultsAcceptServiceImpl acceptService;
 
@@ -70,7 +73,18 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
     @Before
     public void setUp() throws Exception {
         super.setUp();
+        // result_version deliberately has no result FK so its immutable audit rows
+        // survive fixture CASCADE cleanup. Truncate that test-only sidecar explicitly
+        // so reused Result ids still begin at version 1 on repeated/suite-order runs.
+        cleanRowsInCurrentConnection(new String[] { "result_version" });
         executeDataSetWithStateManagement("testdata/analyzer-results-unmatched.xml");
+        // Other fixture classes can RESTART these sequences while leaving rows in
+        // the shared test database. Realign before PatientUtil may create UNKNOWN_.
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute("SELECT setval('clinlims.person_seq',"
+                + " CAST ((SELECT coalesce(MAX(id), 0) FROM clinlims.person) AS BIGINT) + 1)");
+        jdbc.execute("SELECT setval('clinlims.patient_seq',"
+                + " CAST ((SELECT coalesce(MAX(id), 0) FROM clinlims.patient) AS BIGINT) + 1)");
         PatientUtil.invalidateUnknownPatients();
         PatientUtil.getUnknownPatient();
     }
@@ -144,6 +158,15 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         assertEquals("2823-3", acceptedResult.getLoinc());
         assertEquals("mmol/L", acceptedResult.getUcumValue());
         assertEquals("NORMALIZED", acceptedResult.getStatus());
+        // LIS-97: the analyzer-provided range/flag reach the clinical Result
+        // from the STAGING ROW (the posted item above never carried them —
+        // hydrateStagingFlags supplies them), and the lab-owned result_limits
+        // range stays what addMinMaxNormal computed (±Infinity here, no
+        // result_limits fixture — LIS-191), never derived from the analyzer's.
+        assertEquals(LONG_ANALYZER_RANGE, acceptedResult.getReferenceRange());
+        assertEquals(LONG_ANALYZER_FLAG, acceptedResult.getAbnormalFlag());
+        assertEquals(Double.NEGATIVE_INFINITY, acceptedResult.getMinNormal(), 0.0);
+        assertEquals(Double.POSITIVE_INFINITY, acceptedResult.getMaxNormal(), 0.0);
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("accept must append one immutable result version", Integer.valueOf(1),
@@ -156,6 +179,14 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         assertEquals("NORMALIZED",
                 jdbc.queryForObject(
                         "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
+        assertEquals("version 1 must retain the complete range paired with value 4.1", LONG_ANALYZER_RANGE,
+                jdbc.queryForObject(
+                        "SELECT reference_range FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(acceptedResult.getId())));
+        assertEquals("version 1 must retain the complete flag paired with value 4.1", LONG_ANALYZER_FLAG,
+                jdbc.queryForObject(
+                        "SELECT abnormal_flag FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
                         String.class, Long.valueOf(acceptedResult.getId())));
     }
 
@@ -194,6 +225,8 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         assertEquals("2823-3", updatedResult.getLoinc());
         assertNull(updatedResult.getUcumValue());
         assertEquals("PARTIAL", updatedResult.getStatus());
+        assertEquals("4.0 to 6.0", updatedResult.getReferenceRange());
+        assertEquals("H", updatedResult.getAbnormalFlag());
 
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals("the existing Result update must append version 2", Integer.valueOf(2),
@@ -206,6 +239,21 @@ public class AnalyzerResultsAcceptUnmatchedGateTest extends BaseWebContextSensit
         assertEquals("PARTIAL",
                 jdbc.queryForObject(
                         "SELECT status FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                        String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("version 1 must keep the complete original range beside value 4.1", LONG_ANALYZER_RANGE,
+                jdbc.queryForObject(
+                        "SELECT reference_range FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("version 1 must keep the complete original flag beside value 4.1", LONG_ANALYZER_FLAG,
+                jdbc.queryForObject(
+                        "SELECT abnormal_flag FROM clinlims.result_version WHERE result_id = ? AND version_number = 1",
+                        String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("version 2 must keep the replacement range beside value 5.2", "4.0 to 6.0", jdbc.queryForObject(
+                "SELECT reference_range FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
+                String.class, Long.valueOf(updatedResult.getId())));
+        assertEquals("version 2 must keep the replacement flag beside value 5.2", "H",
+                jdbc.queryForObject(
+                        "SELECT abnormal_flag FROM clinlims.result_version WHERE result_id = ? AND version_number = 2",
                         String.class, Long.valueOf(updatedResult.getId())));
     }
 

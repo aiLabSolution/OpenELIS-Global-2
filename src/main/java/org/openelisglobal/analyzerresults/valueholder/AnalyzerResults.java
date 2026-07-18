@@ -40,7 +40,8 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     // Column widths of the wire-derived staging fields. The FHIR import boundary
     // (AnalyzerFhirImportController) enforces these before insert — accession
-    // rejects the bundle, signal fields truncate — because an over-length value
+    // rejects the bundle, bounded signal fields truncate — because an over-length
+    // value
     // otherwise fails the whole bundle insert and the bridge re-POSTs it forever
     // (LIS-244). accession_number is 25, not the pre-031 20: liquibase 031
     // widened the DB column for 10-char SITEYEARNUM prefixes.
@@ -95,6 +96,17 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     // carries no signal and never blocks anything (LIS-239).
     @Column(name = "patient_hint", length = PATIENT_HINT_MAX_LENGTH)
     private String patientHint;
+
+    // Analyzer-provided reference range and abnormal flag, verbatim from the
+    // wire (ASTM R.6/R.7, HL7 OBX-7/OBX-8 → FHIR Observation.referenceRange /
+    // .interpretation). Analyzer EVIDENCE only — the lab-owned result_limits
+    // range applied at accept (LIS-188/LIS-191) is never derived from, nor
+    // overwritten by, these. Null when the source carried none (LIS-97).
+    @Column(name = "reference_range", columnDefinition = "TEXT")
+    private String referenceRange;
+
+    @Column(name = "abnormal_flag", columnDefinition = "TEXT")
+    private String abnormalFlag;
 
     @Column(name = "DUPLICATE_ID", length = 10)
     @Convert(converter = StringToIntegerConverter.class)
@@ -157,6 +169,22 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     public void setControlLevel(String controlLevel) {
         this.controlLevel = controlLevel;
+    }
+
+    public String getReferenceRange() {
+        return referenceRange;
+    }
+
+    public void setReferenceRange(String referenceRange) {
+        this.referenceRange = referenceRange;
+    }
+
+    public String getAbnormalFlag() {
+        return abnormalFlag;
+    }
+
+    public void setAbnormalFlag(String abnormalFlag) {
+        this.abnormalFlag = abnormalFlag;
     }
 
     public Object clone() throws CloneNotSupportedException {

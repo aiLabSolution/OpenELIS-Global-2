@@ -407,6 +407,8 @@ public class AnalyzerResultsController extends BaseController {
         resultItem.setLoinc(result.getLoinc());
         resultItem.setUcumValue(result.getUcumValue());
         resultItem.setNormalizationStatus(result.getNormalizationStatus());
+        resultItem.setReferenceRange(result.getReferenceRange());
+        resultItem.setAbnormalFlag(result.getAbnormalFlag());
         resultItem.setId(result.getId());
         resultItem.setTestId(result.getTestId());
         resultItem.setCompleteDate(result.getCompleteDateForDisplay());
