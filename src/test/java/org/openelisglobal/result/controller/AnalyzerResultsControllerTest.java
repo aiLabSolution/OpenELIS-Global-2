@@ -58,4 +58,16 @@ public class AnalyzerResultsControllerTest extends BaseWebContextSensitiveTest {
                 .andExpect(jsonPath("$.resultList[0].referenceRange").value("3.9-6.1 mmol/L"))
                 .andExpect(jsonPath("$.resultList[0].abnormalFlag").value("N"));
     }
+
+    // LIS-270: the staging UI raises a "verify accession against patient"
+    // warning off row.wirePatientIdentityAbsent, so the GET JSON must carry it —
+    // computed server-side from a blank patientHint (the fixture rows carry no
+    // patient_hint, mirroring the SNIBE MAGLUMI X3's bare P|1 wire). The
+    // safety-critical direction is that the flag FIRES when identity is absent:
+    // a false negative would silence the only downstream signal on this wire.
+    @Test
+    public void showRestAnalyzerResults_ShouldFlagWirePatientIdentityAbsent_WhenNoPatientHint() throws Exception {
+        mockMvc.perform(get("/rest/AnalyzerResults").param("id", "2001")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultList[0].wirePatientIdentityAbsent").value(true));
+    }
 }
