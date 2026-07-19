@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.apache.commons.validator.GenericValidator;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
@@ -585,5 +586,70 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
         assertEquals("equal hints must not block — USE substitutes the corrected value", "6.4", original.getResult());
         assertTrue("partner note must record both values",
                 original.getNote() != null && original.getNote().contains("3.2") && original.getNote().contains("6.4"));
+    }
+
+    // ---------------------------------------------------------------
+    // LIS-270: the blank-hint residual at the accept boundary
+    // ---------------------------------------------------------------
+
+    @Test
+    public void useSameDayPatientCollision_blankWireHints_substitutesSilently_LIS270Residual() {
+        // NOWIRE800 (1023/1024) is the SAME two-patient collision as SENT500, but
+        // staged from a wire that sends NO patient identity — the SNIBE MAGLUMI X3
+        // case (bare P|1 ⇒ patient_hint NULL on every row).
+        //
+        // This test asserts the RESIDUAL, not desired behaviour: the collision is
+        // NOT caught. LIS-128 cannot see it (same calendar day) and the LIS-239
+        // guard cannot fire (patientHintsConflict needs two non-blank hints to
+        // compare), so one patient's value silently substitutes onto another
+        // patient's accession. Compare
+        // useSameDayPatientMismatch_blocksFailClosedAndLeavesStagingIntact: the
+        // same collision WITH hints is refused fail-closed. The only difference is
+        // the wire identity — which is precisely why LIS-270 shipped a compensating
+        // control (operator SOP + the wirePatientIdentityAbsent staging banner)
+        // instead of a fix.
+        //
+        // SCOPE OF THIS PIN — read before trusting a green run. Like the rest of
+        // this class (see the class javadoc), the assertion is made at the SEAM:
+        // it pins resolveLinkedCorrections / patientHintsConflict only. An edit to
+        // patientHintsConflict that changes patient-safety behaviour on hint-less
+        // wires breaks this test and has to justify itself. That is all it proves.
+        //
+        // It does NOT prove the collision is unblocked end-to-end. Note the
+        // asymmetry with its blocked counterpart: useSameDayPatientMismatch_blocks-
+        // FailClosedAndLeavesStagingIntact is proven through acceptAndPersist,
+        // whereas this residual is proven only at the seam.
+        //
+        // In particular LIS-296 (order-side cross-check) — the systematic control
+        // that SHOULD eventually make this collision blocked — lands DOWNSTREAM of
+        // this seam, in the accept-persist legs (createGroupForSampleAndDemographics-
+        // Entered / getExistingAnalysis), which this test never executes. So LIS-296
+        // will NOT break this test: it can stay green while the collision becomes
+        // properly blocked at the real accept boundary. Do not read a green run here
+        // as evidence that the residual still exists once LIS-296 has landed —
+        // re-verify at acceptAndPersist instead.
+        AnalyzerResultItem original = buildItem("1023", "5.2", false, "1024", "4001", "NOWIRE800", "Glucose", 1, true,
+                false, false);
+        AnalyzerResultItem correction = buildItem("1024", "11.8", true, "1023", "4001", "NOWIRE800", "Glucose", 1,
+                false, false, false);
+        correction.setCorrectionAction("USE");
+
+        List<AnalyzerResultItem> items = List.of(original, correction);
+        acceptService.hydrateStagingFlags(items);
+
+        // Precondition: the guard's own input really is blank on both rows. Without
+        // this the test could pass while silently exercising the hinted path.
+        assertTrue("precondition: both rows must reach the guard with a blank wire hint",
+                GenericValidator.isBlankOrNull(original.getStagingPatientHint())
+                        && GenericValidator.isBlankOrNull(correction.getStagingPatientHint()));
+
+        acceptService.resolveLinkedCorrections(items);
+
+        // Substitution also proves the pair genuinely linked — the collision is
+        // structurally invisible to the guard, not merely skipped by the fixture.
+        assertEquals("RESIDUAL (LIS-270): a two-patient collision with blank wire hints is NOT blocked —"
+                + " the other patient's value silently substitutes", "11.8", original.getResult());
+        assertTrue("partner note must still record both values", original.getNote() != null
+                && original.getNote().contains("5.2") && original.getNote().contains("11.8"));
     }
 }
