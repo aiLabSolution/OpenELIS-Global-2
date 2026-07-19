@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.apache.commons.validator.GenericValidator;
 import org.junit.Before;
 import org.junit.Test;
 import org.openelisglobal.BaseWebContextSensitiveTest;
@@ -585,5 +586,60 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
         assertEquals("equal hints must not block — USE substitutes the corrected value", "6.4", original.getResult());
         assertTrue("partner note must record both values",
                 original.getNote() != null && original.getNote().contains("3.2") && original.getNote().contains("6.4"));
+    }
+
+    // ---------------------------------------------------------------
+    // LIS-270: the blank-hint residual at the accept boundary
+    // ---------------------------------------------------------------
+
+    @Test
+    public void useSameDayPatientCollision_blankWireHints_substitutesSilently_LIS270Residual() {
+        // NOWIRE800 (1023/1024) is the SAME two-patient collision as SENT500, but
+        // staged from a wire that sends NO patient identity — the SNIBE MAGLUMI X3
+        // case (bare P|1 ⇒ patient_hint NULL on every row).
+        //
+        // This test asserts the RESIDUAL, not desired behaviour: the collision is
+        // NOT caught. LIS-128 cannot see it (same calendar day) and the LIS-239
+        // guard cannot fire (patientHintsConflict needs two non-blank hints to
+        // compare), so one patient's value silently substitutes onto another
+        // patient's accession. Compare
+        // useSameDayPatientMismatch_blocksFailClosedAndLeavesStagingIntact: the
+        // same collision WITH hints is refused fail-closed. The only difference is
+        // the wire identity — which is precisely why LIS-270 shipped a compensating
+        // control (operator SOP + the wirePatientIdentityAbsent staging banner)
+        // instead of a fix.
+        //
+        // Pinning the residual keeps it a KNOWN state: a future edit to
+        // patientHintsConflict that changes patient-safety behaviour on hint-less
+        // wires will break this test and have to justify itself. LIS-296 (order-side
+        // cross-check) is the systematic control that SHOULD eventually make this
+        // collision blocked — when it lands this test is expected to fail, and must
+        // be rewritten deliberately, never relaxed.
+        AnalyzerResultItem original = buildItem("1023", "5.2", false, "1024", "4001", "NOWIRE800", "Glucose", 1, true,
+                false, false);
+        AnalyzerResultItem correction = buildItem("1024", "11.8", true, "1023", "4001", "NOWIRE800", "Glucose", 1,
+                false, false, false);
+        correction.setCorrectionAction("USE");
+        // NOWIRE800 has no registered sample/order — clear the orthogonal LIS-126
+        // unmatched gate so the (inert) patient-mismatch guard is what is under test.
+        original.setUnmatchedAction("ACCEPT_UNKNOWN");
+
+        List<AnalyzerResultItem> items = List.of(original, correction);
+        acceptService.hydrateStagingFlags(items);
+
+        // Precondition: the guard's own input really is blank on both rows. Without
+        // this the test could pass while silently exercising the hinted path.
+        assertTrue("precondition: both rows must reach the guard with a blank wire hint",
+                GenericValidator.isBlankOrNull(original.getStagingPatientHint())
+                        && GenericValidator.isBlankOrNull(correction.getStagingPatientHint()));
+
+        acceptService.resolveLinkedCorrections(items);
+
+        // Substitution also proves the pair genuinely linked — the collision is
+        // structurally invisible to the guard, not merely skipped by the fixture.
+        assertEquals("RESIDUAL (LIS-270): a two-patient collision with blank wire hints is NOT blocked —"
+                + " the other patient's value silently substitutes", "11.8", original.getResult());
+        assertTrue("partner note must still record both values", original.getNote() != null
+                && original.getNote().contains("5.2") && original.getNote().contains("11.8"));
     }
 }
