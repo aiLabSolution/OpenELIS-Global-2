@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="lis271-001-add-analyzer-results-import-received-time" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists schemaName="clinlims" tableName="analyzer_results" columnName="import_received_time"/>
+            </not>
+        </preConditions>
+        <comment>Record OE's own receive-time clock for a staged analyzer result, distinct from complete_date (which stays derived from the analyzer's onboard clock, unchanged). The real MAGLUMI X3 bench clock was found ~16 months wrong (LIS-271); complete_date alone can't reveal that, so import_received_time gives every row a truthful second timestamp to compare against. Null on rows written before this migration.</comment>
+
+        <addColumn schemaName="clinlims" tableName="analyzer_results">
+            <column name="import_received_time" type="TIMESTAMP"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn schemaName="clinlims" tableName="analyzer_results" columnName="import_received_time"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

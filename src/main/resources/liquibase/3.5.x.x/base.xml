@@ -187,4 +187,7 @@
   <!-- LIS-97 follow-up: preserve full analyzer evidence in an append-only archive before a downgrade restores the legacy VARCHAR limits. -->
   <include relativeToChangelogFile="true" file="061-lis97-rollback-evidence-archive.xml"/>
 
+  <!-- LIS-271: record OE's own receive-time clock alongside complete_date (which stays derived from the analyzer's onboard clock, unchanged) so a wrong analyzer clock is provable, not just inferable. 060 and 061 are both taken by LIS-97 (merged) — renumbered 061->062. -->
+  <include relativeToChangelogFile="true" file="062-analyzer-results-import-received-time.xml"/>
+
 </databaseChangeLog>

@@ -92,7 +92,13 @@ public class ImportIssuesRestController extends BaseRestController {
         m.put("testId", r.getTestId());
         m.put("readOnly", r.isReadOnly());
         m.put("importIssueReason", r.getImportIssueReason());
+        // completeDate = analyzer-reported completion time (trusted verbatim from
+        // the wire); importReceivedTime = OE's own receive-time clock. The two
+        // diverge when the analyzer's onboard clock is wrong — see "clock-skew"
+        // in importIssueReason (LIS-271).
         m.put("completeDate", r.getCompleteDate() != null ? r.getCompleteDate().toInstant().toString() : null);
+        m.put("importReceivedTime",
+                r.getImportReceivedTime() != null ? r.getImportReceivedTime().toInstant().toString() : null);
         m.put("lastupdated", r.getLastupdated() != null ? r.getLastupdated().toInstant().toString() : null);
         return m;
     }

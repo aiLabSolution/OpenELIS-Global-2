@@ -128,6 +128,17 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
     @Column(name = "complete_date")
     private Timestamp completeDate;
 
+    // The analyzer bridge's onboard-clock timestamp (Observation.effectiveDateTime)
+    // is what completeDate above is derived from — unchanged behavior, since
+    // LIS-128's cross-day correction guard and the clinical completion time both
+    // key off completeDate. import_received_time instead records OE's OWN wall
+    // clock at the moment this bundle was processed, so the record stays truthful
+    // about provenance even when the analyzer's clock is wrong (LIS-271: the real
+    // MAGLUMI X3 bench clock was ~16 months off). Compare the two to see the skew
+    // that import_issue_reason="clock-skew" flags.
+    @Column(name = "import_received_time")
+    private Timestamp importReceivedTime;
+
     @Column(name = "import_issue_reason", length = IMPORT_ISSUE_REASON_MAX_LENGTH)
     private String importIssueReason;
 
@@ -305,6 +316,14 @@ public class AnalyzerResults extends BaseObject<String> implements Cloneable {
 
     public String getCompleteDateForDisplay() {
         return DateUtil.convertTimestampToStringDate(completeDate);
+    }
+
+    public void setImportReceivedTime(Timestamp importReceivedTime) {
+        this.importReceivedTime = importReceivedTime;
+    }
+
+    public Timestamp getImportReceivedTime() {
+        return importReceivedTime;
     }
 
     public void setDuplicateAnalyzerResultId(String duplicateAnalyzerResultId) {
