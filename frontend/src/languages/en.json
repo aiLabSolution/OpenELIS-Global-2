@@ -593,6 +593,8 @@
   "analyzer.qcRules.error.saveFailed": "Failed to save QC rule",
   "analyzer.qcRules.error.deleteFailed": "Failed to delete QC rule",
   "analyzer.unmatched.accept.label": "No matching order — accept as unidentified patient",
+  "analyzer.wire.noPatientIdentity.title": "No patient identity from analyzer",
+  "analyzer.wire.noPatientIdentity.subtitle": "These results carry no patient identity on the wire. Confirm each accession number matches the intended patient before accepting — the same-day patient-mismatch guard cannot detect a mis-keyed accession on this channel.",
   "analyzerTestName.header.analyzerName": "Analyzer - Analyzer Test Name",
   "analyzerTestName.modal.add.heading": "Add Analyzer Test Name",
   "analyzerTestName.modal.update.heading": "Update Analyzer Test Name",

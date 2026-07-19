@@ -421,6 +421,11 @@ public class AnalyzerResultsController extends BaseController {
         resultItem.setDictionaryResultList(getDictionaryResultList(result));
         resultItem.setIsHighlighted(!GenericValidator.isBlankOrNull(result.getDuplicateAnalyzerResultId())
                 || GenericValidator.isBlankOrNull(result.getTestId()));
+        // LIS-270: flag rows whose wire carried no patient identity (patientHint
+        // blank), so the staging UI can warn that the LIS-239 mismatch guard is
+        // inert here. Controls carry no patient dimension and never trip it.
+        resultItem.setWirePatientIdentityAbsent(
+                !result.getIsControl() && GenericValidator.isBlankOrNull(result.getPatientHint()));
         resultItem.setUserChoiceReflex(giveUserChoice(result));
         resultItem.setUserChoicePending(false);
 

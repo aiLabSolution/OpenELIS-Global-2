@@ -125,6 +125,17 @@ public class AnalyzerResultItem implements Serializable {
     // Consumed by AnalyzerResultsAcceptServiceImpl.gateUnmatchedSampleGroups.
     private String unmatchedAction;
 
+    // GET-time only: the analyzer wire carried no patient identity for this row
+    // (patientHint blank — e.g. the SNIBE MAGLUMI X3's bare P|1 record), so the
+    // LIS-239 same-day patient-mismatch guard is structurally inert here and a
+    // mis-keyed accession cannot be caught downstream (LIS-270). Derived server
+    // side from the staging row's patientHint; the hint value itself stays
+    // server-only (never serialized). Display-only signal — the staging UI
+    // raises a worklist-level "verify accession against patient" warning — and
+    // it does not block accept, so a posted value is meaningless and untrusted
+    // (not in the controller's allowed fields). False for controls.
+    private boolean wirePatientIdentityAbsent = false;
+
     @SafeHtml(level = SafeHtml.SafeListLevel.NONE, groups = { AnalyzerResultsForm.AnalyzerResuts.class })
     private String testResultType = "N";
 
@@ -433,6 +444,14 @@ public class AnalyzerResultItem implements Serializable {
 
     public boolean isUnmatchedSample() {
         return unmatchedSample;
+    }
+
+    public void setWirePatientIdentityAbsent(boolean wirePatientIdentityAbsent) {
+        this.wirePatientIdentityAbsent = wirePatientIdentityAbsent;
+    }
+
+    public boolean isWirePatientIdentityAbsent() {
+        return wirePatientIdentityAbsent;
     }
 
     public void setUnmatchedAction(String unmatchedAction) {
