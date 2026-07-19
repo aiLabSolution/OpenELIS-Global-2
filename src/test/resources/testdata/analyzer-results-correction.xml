@@ -194,10 +194,12 @@
         accept boundary from the CORR100 genuine correction — that indistinguishability
         IS the defect, and on this wire the only remaining defences are the operator
         SOP (docs/runbooks/x3-patient-identity-verification-sop.md in the umbrella
-        repo) and the staging banner driven by wirePatientIdentityAbsent. The systematic
-        control that WILL change this behaviour is LIS-296 (order-side cross-check).
-        When it lands, the companion test is expected to fail and must be updated
-        deliberately, not relaxed. -->
+        repo) and the staging banner driven by wirePatientIdentityAbsent. The companion
+        test pins this at the resolveLinkedCorrections seam only, NOT end-to-end.
+        LIS-296 (order-side cross-check) is the systematic control that should eventually
+        block this collision, but it lands downstream in the accept-persist legs,
+        so it will NOT break the companion test — re-verify at acceptAndPersist once
+        it ships. -->
     <analyzer_results id="1023" analyzer_id="2001"
         accession_number="NOWIRE800" test_name="Glucose" result="5.2"
         units="mmol/L" iscontrol="false" last_updated="2025-07-01 13:00:00"

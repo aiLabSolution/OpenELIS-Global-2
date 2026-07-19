@@ -609,20 +609,30 @@ public class AnalyzerResultsAcceptServiceImplTest extends BaseWebContextSensitiv
         // control (operator SOP + the wirePatientIdentityAbsent staging banner)
         // instead of a fix.
         //
-        // Pinning the residual keeps it a KNOWN state: a future edit to
+        // SCOPE OF THIS PIN — read before trusting a green run. Like the rest of
+        // this class (see the class javadoc), the assertion is made at the SEAM:
+        // it pins resolveLinkedCorrections / patientHintsConflict only. An edit to
         // patientHintsConflict that changes patient-safety behaviour on hint-less
-        // wires will break this test and have to justify itself. LIS-296 (order-side
-        // cross-check) is the systematic control that SHOULD eventually make this
-        // collision blocked — when it lands this test is expected to fail, and must
-        // be rewritten deliberately, never relaxed.
+        // wires breaks this test and has to justify itself. That is all it proves.
+        //
+        // It does NOT prove the collision is unblocked end-to-end. Note the
+        // asymmetry with its blocked counterpart: useSameDayPatientMismatch_blocks-
+        // FailClosedAndLeavesStagingIntact is proven through acceptAndPersist,
+        // whereas this residual is proven only at the seam.
+        //
+        // In particular LIS-296 (order-side cross-check) — the systematic control
+        // that SHOULD eventually make this collision blocked — lands DOWNSTREAM of
+        // this seam, in the accept-persist legs (createGroupForSampleAndDemographics-
+        // Entered / getExistingAnalysis), which this test never executes. So LIS-296
+        // will NOT break this test: it can stay green while the collision becomes
+        // properly blocked at the real accept boundary. Do not read a green run here
+        // as evidence that the residual still exists once LIS-296 has landed —
+        // re-verify at acceptAndPersist instead.
         AnalyzerResultItem original = buildItem("1023", "5.2", false, "1024", "4001", "NOWIRE800", "Glucose", 1, true,
                 false, false);
         AnalyzerResultItem correction = buildItem("1024", "11.8", true, "1023", "4001", "NOWIRE800", "Glucose", 1,
                 false, false, false);
         correction.setCorrectionAction("USE");
-        // NOWIRE800 has no registered sample/order — clear the orthogonal LIS-126
-        // unmatched gate so the (inert) patient-mismatch guard is what is under test.
-        original.setUnmatchedAction("ACCEPT_UNKNOWN");
 
         List<AnalyzerResultItem> items = List.of(original, correction);
         acceptService.hydrateStagingFlags(items);
