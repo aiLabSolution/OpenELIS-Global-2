@@ -67,6 +67,16 @@ const AnalyserResults = (props) => {
     (r) =>
       r.result && (/failed/i.test(r.result) || /\binvalid\b/i.test(r.result)),
   );
+  // LIS-270: rows whose analyzer wire carried no patient identity (patientHint
+  // blank — e.g. the SNIBE MAGLUMI X3's bare P|1 record). On these the LIS-239
+  // same-day patient-mismatch guard is structurally inert, so a mis-keyed
+  // accession cannot be caught downstream. Surface a prominent, worklist-level
+  // prompt to verify each accession against the intended patient before accept.
+  // QC controls carry no patient dimension and are excluded (patientResults
+  // already drops isControl; the server also reports the flag false for them).
+  const hasWirePatientIdentityAbsent = patientResults.some(
+    (r) => r.wirePatientIdentityAbsent,
+  );
 
   const columns = [
     {
@@ -547,6 +557,23 @@ const AnalyserResults = (props) => {
         >
           <FormattedMessage id="validation.no.records.display" />
         </div>
+      )}
+      {hasWirePatientIdentityAbsent && (
+        <InlineNotification
+          kind="warning"
+          title={intl.formatMessage({
+            id: "analyzer.wire.noPatientIdentity.title",
+            defaultMessage: "No patient identity from analyzer",
+          })}
+          subtitle={intl.formatMessage({
+            id: "analyzer.wire.noPatientIdentity.subtitle",
+            defaultMessage:
+              "These results carry no patient identity on the wire. Confirm each accession number matches the intended patient before accepting — the same-day patient-mismatch guard cannot detect a mis-keyed accession on this channel.",
+          })}
+          lowContrast
+          hideCloseButton
+          style={{ marginTop: "16px", marginBottom: "8px" }}
+        />
       )}
       {hasQcFailures && (
         <InlineNotification
