@@ -251,6 +251,13 @@
             'CALIBRATION_SPECIMEN_ID_PREFIX',
             'CALIBRATION_SPECIMEN_ID_PATTERN'));
         </sql>
+        <!-- Explicit: the raw ALTERs above have no inverse, so without this a
+            rollback through this changeset fails and the production rollback blocks
+            below could never be exercised at all. -->
+        <rollback>
+            <dropTable schemaName="clinlims"
+                tableName="analyzer_qc_rule" />
+        </rollback>
     </changeSet>
 
     <include
