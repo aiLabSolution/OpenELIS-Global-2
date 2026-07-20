@@ -181,7 +181,11 @@
             INSERT INTO clinlims.test
             (id, name, description, loinc, is_active, orderable, local_code,
             lastupdated)
-            VALUES (900, 'TSH', 'TSH(Serum)', '3016-3', 'Y', true, 'CATALOG-TSH-Serum',
+            <!-- Deliberately RETIRED (is_active='N', orderable=false): stands for
+                a Test a lab took out of service. Adopting it must not quietly put it back
+                into service — see retiredCatalogTestIsNotSilentlyReactivated(). -->
+            VALUES (900, 'TSH', 'TSH(Serum)', '3016-3', 'N', false,
+            'CATALOG-TSH-Serum',
             now());
 
             INSERT INTO clinlims.test_result
@@ -192,6 +196,30 @@
             INSERT INTO clinlims.test_result_component (id, test_id, result_type,
             significant_digits)
             VALUES (900, 900, 'N', 2);
+
+            <!-- A numeric test belonging to a DIFFERENT analyzer, at a hand-set precision.
+                It must be mapped to something, otherwise 054's global predicate would skip
+                it too and the scoping assertion would prove nothing. This is the row that
+                distinguishes "re-pass scoped to the X3" from "re-pass over every analyzer's
+                mapped tests" — see precisionRepassDoesNotTouchTestsOutsideTheX3Map(). -->
+            INSERT INTO clinlims.analyzer
+            (id, name, description, is_active, status, last_updated)
+            VALUES (800, 'OTHER ANALYZER', 'unrelated analyzer', true, 'SETUP', now());
+
+            INSERT INTO clinlims.test
+            (id, name, description, loinc, is_active, orderable, local_code,
+            lastupdated)
+            VALUES (901, 'Other Glucose', 'Other Glucose(Serum)', '2345-7', 'Y', true,
+            'CATALOG-OTHER-GLU', now());
+
+            INSERT INTO clinlims.analyzer_test_map
+            (analyzer_id, analyzer_test_name, test_id, last_updated)
+            VALUES (800, 'GLU', 901, now());
+
+            INSERT INTO clinlims.test_result
+            (id, test_id, tst_rslt_type, significant_digits, sort_order,
+            is_quantifiable, is_active, is_normal, lastupdated)
+            VALUES (901, 901, 'N', 2, 1, 'f', 't', 'f', now());
         </sql>
     </changeSet>
 

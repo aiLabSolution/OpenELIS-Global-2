@@ -61,7 +61,15 @@ public class MaglumiX3SeedRollbackTest {
                 assertEquals("the seeded analyzer must be gone", 0,
                         count(connection, "SELECT count(*) FROM clinlims.analyzer WHERE name = '" + ANALYZER + "'"));
                 assertEquals("its map rows go with it via the ON DELETE CASCADE fk", 0,
-                        count(connection, "SELECT count(*) FROM clinlims.analyzer_test_map"));
+                        count(connection,
+                                "SELECT count(*) FROM clinlims.analyzer_test_map m"
+                                        + " JOIN clinlims.analyzer a ON a.id = m.analyzer_id WHERE a.name = '"
+                                        + ANALYZER + "'"));
+                assertEquals("another analyzer's mapping is not collateral damage", 1,
+                        count(connection,
+                                "SELECT count(*) FROM clinlims.analyzer_test_map m"
+                                        + " JOIN clinlims.analyzer a ON a.id = m.analyzer_id"
+                                        + " WHERE a.name = 'OTHER ANALYZER'"));
                 assertEquals("Tests this seed created are scoped by the X3-* local_code it assigns", 0,
                         count(connection, "SELECT count(*) FROM clinlims.test WHERE local_code LIKE 'X3-%-Serum'"));
 

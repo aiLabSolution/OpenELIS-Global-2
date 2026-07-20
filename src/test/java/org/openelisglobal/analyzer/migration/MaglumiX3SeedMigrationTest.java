@@ -263,7 +263,17 @@ public class MaglumiX3SeedMigrationTest {
     /** Re-running the changelog must not duplicate any seeded row. */
     @Test
     public void isIdempotent() throws Exception {
+        // Simply calling update() again proves nothing: liquibase sees the changesets
+        // in
+        // DATABASECHANGELOG and skips them, so the seed's own NOT EXISTS / sqlCheck
+        // guards are never re-executed — the assertions below would pass even if every
+        // guard were deleted. Forget the LIS-272 changesets first so they genuinely
+        // re-run against an already-seeded database, which is what idempotency means.
+        try (java.sql.Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DELETE FROM databasechangelog WHERE id LIKE 'lis272-0%'");
+        }
         liquibase.update(new Contexts());
+
         assertEquals(1, count("SELECT COUNT(*) FROM clinlims.analyzer WHERE name = '" + ANALYZER + "'"));
         assertEquals(3, count("SELECT COUNT(*) FROM clinlims.analyzer_test_map m"
                 + " JOIN clinlims.analyzer a ON a.id = m.analyzer_id WHERE a.name = '" + ANALYZER + "'"));
@@ -271,6 +281,47 @@ public class MaglumiX3SeedMigrationTest {
                 + " JOIN clinlims.analyzer a ON a.id = r.analyzer_id WHERE a.name = '" + ANALYZER + "'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinlims.unit_of_measure WHERE name = 'uIU/mL'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinlims.test WHERE loinc = '14928-6'"));
+    }
+
+    /**
+     * Adopting a catalog Test must link its UOM and nothing else. The fixture's TSH
+     * row is deliberately retired (is_active='N', orderable=false), standing for a
+     * Test a lab took out of service; an earlier revision of cs2 also set
+     * is_active='Y' and orderable=true on every row carrying a seeded LOINC, which
+     * would have quietly put it back into service on upgrade — and the rollback,
+     * scoped to the X3-* local_code this seed assigns, could not have undone that
+     * on an adopted row.
+     */
+    @Test
+    public void retiredCatalogTestIsNotSilentlyReactivated() throws Exception {
+        assertEquals("adopting a Test must not re-activate it", "N",
+                scalar("SELECT is_active FROM clinlims.test WHERE local_code = 'CATALOG-TSH-Serum'"));
+        assertEquals("adopting a Test must not make it orderable again", "f",
+                scalar("SELECT orderable FROM clinlims.test WHERE local_code = 'CATALOG-TSH-Serum'"));
+        // The adoption itself must still have happened: the UOM is the one field cs2
+        // owns.
+        assertEquals("uIU/mL", scalar("SELECT u.name FROM clinlims.test t"
+                + " JOIN clinlims.unit_of_measure u ON u.id = t.uom_id" + " WHERE t.local_code = 'CATALOG-TSH-Serum'"));
+    }
+
+    /**
+     * The precision re-pass must not reach beyond this slice. 054's predicate is
+     * every analyzer's mapped test; reusing it verbatim would also reset display
+     * precision a lab set by hand on unrelated tests, and this changeset's rollback
+     * is a no-op.
+     */
+    @Test
+    public void precisionRepassDoesNotTouchTestsOutsideTheX3Map() throws Exception {
+        // Test 901 is mapped, but to OTHER ANALYZER. That is the point: an unmapped
+        // test
+        // would be skipped by the global predicate too, so it could not tell the two
+        // apart. This row is reset to -1 by 054's predicate and left alone by the
+        // scoped
+        // one, which is exactly the difference being asserted.
+        assertEquals("another analyzer's hand-set precision must survive the X3 re-pass", "2",
+                scalar("SELECT significant_digits FROM clinlims.test_result WHERE test_id = 901"));
+        // ...while the X3's own mapped tests are still widened to raw.
+        assertEquals("-1", scalar("SELECT significant_digits FROM clinlims.test_result WHERE test_id = 900"));
     }
 
     private String ucumFor(String unitName) throws SQLException {

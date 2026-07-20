@@ -161,14 +161,17 @@
                     ('3024-7',  'ng/dL',  'Free T4', 'Free T4', 'X3-FT4II-Serum', 301),
                     ('3016-3',  'uIU/mL', 'TSH',     'TSH',     'X3-TSHII-Serum', 302)
             )
+            <!-- Link the UOM and nothing else. An earlier revision also set
+                 is_active='Y' and orderable=true here, which would silently re-enable a
+                 Test a lab had deliberately retired — and the rollback below is scoped to
+                 the X3-* local_code this seed assigns, so it could not undo that on an
+                 adopted row. Adopting a catalog Test must not change its lifecycle state. -->
             UPDATE clinlims.test t
                SET uom_id = COALESCE((
                         SELECT min(u.id) FROM clinlims.unit_of_measure u
                          WHERE lower(u.name) = lower(v.unit_name)
                             OR lower(u.description) = lower(v.unit_name)
                             OR u.code = v.unit_name), t.uom_id),
-                   is_active = 'Y',
-                   orderable = true,
                    lastupdated = now()
               FROM x3_tests v
              WHERE t.loinc = v.loinc;
@@ -337,26 +340,37 @@
                 <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
             </and>
         </preConditions>
-        <comment>Re-run the LIS-188 raw-precision pass now that the X3 map exists (LIS-272). 054 is a ONE-SHOT UPDATE keyed on analyzer_test_map membership AT MIGRATION TIME, so every mapping added after it — including cs5's — is still left rounding the instrument's decimals on accept (FT4 II 1.58 ng/dL would persist as 1.6, or 2 at significant_digits = 0). The SQL is 054's, deliberately unchanged, so it stays a no-op for everything 054 already corrected.</comment>
+        <comment>Apply the LIS-188 raw-precision policy to the X3's mapped tests (LIS-272). 054 is a ONE-SHOT UPDATE keyed on analyzer_test_map membership AT MIGRATION TIME, so mappings added after it — including cs5's — are still left rounding the instrument's decimals on accept (FT4 II 1.58 ng/dL would persist as 1.6, or 2 at significant_digits = 0). Scoped to this analyzer rather than reusing 054's global predicate — see the SQL comment.</comment>
         <sql>
+            <!-- Scoped to THIS analyzer's mapped tests, deliberately narrower than 054.
+                 054's predicate is every analyzer's mapped test; re-running it verbatim
+                 would also reset display precision a lab had set by hand since 054 — on
+                 tests unrelated to the X3 — and this rollback is a no-op, so that could
+                 not be undone. 054 itself pointed labs at the Test Catalog screen to set
+                 precision, so those values are real configuration, not seed defaults.
+                 Scoping to the X3 map serves this slice's purpose with no blast radius. -->
             UPDATE clinlims.test_result
                SET significant_digits = -1
              WHERE tst_rslt_type = 'N'
                AND significant_digits IS DISTINCT FROM -1
                AND test_id IN (
-                    SELECT DISTINCT test_id
-                      FROM clinlims.analyzer_test_map
-                     WHERE test_id IS NOT NULL);
+                    SELECT m.test_id
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3'
+                       AND m.test_id IS NOT NULL);
 
             UPDATE clinlims.test_result_component
                SET significant_digits = -1
              WHERE result_type = 'N'
                AND significant_digits IS DISTINCT FROM -1
                AND test_id IN (
-                    SELECT DISTINCT tr.test_id
+                    SELECT tr.test_id
                       FROM clinlims.test_result tr
                       JOIN clinlims.analyzer_test_map m ON m.test_id = tr.test_id
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
                      WHERE tr.tst_rslt_type = 'N'
+                       AND a.name = 'SNIBE MAGLUMI X3'
                        AND m.test_id IS NOT NULL);
         </sql>
         <rollback>
