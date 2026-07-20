@@ -359,9 +359,8 @@ public class AnalyzerQcRuleServiceTest {
         AnalyzerQcRule updates = new AnalyzerQcRule();
         updates.setRuleType(RuleType.SPECIMEN_ID_PREFIX);
         updates.setOperand("CTRL-");
-        updates.setActive(true);
 
-        AnalyzerQcRule updated = service.updateRule("1", "rule-001", updates, "1");
+        AnalyzerQcRule updated = service.updateRule("1", "rule-001", updates, null, "1");
 
         assertEquals(RuleType.SPECIMEN_ID_PREFIX, updated.getRuleType());
         assertEquals("CTRL-", updated.getOperand());
@@ -376,10 +375,7 @@ public class AnalyzerQcRuleServiceTest {
         when(analyzerQcRuleDAO.update(any(AnalyzerQcRule.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        AnalyzerQcRule updates = new AnalyzerQcRule();
-        updates.setActive(false);
-
-        AnalyzerQcRule updated = service.updateRule("1", "rule-001", updates, "1");
+        AnalyzerQcRule updated = service.updateRule("1", "rule-001", new AnalyzerQcRule(), Boolean.FALSE, "1");
 
         assertEquals(false, updated.isActive());
         // Verify original fields preserved when only active changed
@@ -393,20 +389,57 @@ public class AnalyzerQcRuleServiceTest {
     public void testUpdateRule_WrongAnalyzerId_Throws() {
         when(analyzerQcRuleDAO.get("rule-001")).thenReturn(java.util.Optional.of(rule1));
 
-        AnalyzerQcRule updates = new AnalyzerQcRule();
-        updates.setActive(false);
-
-        service.updateRule("2", "rule-001", updates, "1");
+        service.updateRule("2", "rule-001", new AnalyzerQcRule(), null, "1");
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testUpdateRule_NonExistentRuleId_Throws() {
         when(analyzerQcRuleDAO.get("nonexistent")).thenReturn(java.util.Optional.empty());
 
-        AnalyzerQcRule updates = new AnalyzerQcRule();
-        updates.setActive(false);
+        service.updateRule("1", "nonexistent", new AnalyzerQcRule(), null, "1");
+    }
 
-        service.updateRule("1", "nonexistent", updates, "1");
+    // ---- updateRule: isActive is explicit-only (LIS-297) ----
+
+    @Test
+    public void testUpdateRule_NullIsActive_InactiveRuleStaysInactive() {
+        when(analyzerQcRuleDAO.get("rule-003")).thenReturn(java.util.Optional.of(rule3));
+        when(analyzerQcRuleDAO.update(any(AnalyzerQcRule.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AnalyzerQcRule updates = new AnalyzerQcRule();
+        updates.setDescription("operand-only amendment");
+
+        AnalyzerQcRule updated = service.updateRule("1", "rule-003", updates, null, "1");
+
+        assertFalse("partial update without isActive must not activate an inactive rule", updated.isActive());
+        assertEquals("operand-only amendment", updated.getDescription());
+    }
+
+    @Test
+    public void testUpdateRule_NullIsActive_ActiveRuleStaysActive() {
+        when(analyzerQcRuleDAO.get("rule-001")).thenReturn(java.util.Optional.of(rule1));
+        when(analyzerQcRuleDAO.update(any(AnalyzerQcRule.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AnalyzerQcRule updates = new AnalyzerQcRule();
+        updates.setOperand("QC");
+
+        AnalyzerQcRule updated = service.updateRule("1", "rule-001", updates, null, "1");
+
+        assertTrue(updated.isActive());
+        assertEquals("QC", updated.getOperand());
+    }
+
+    @Test
+    public void testUpdateRule_ExplicitTrue_ActivatesInactiveRule() {
+        when(analyzerQcRuleDAO.get("rule-003")).thenReturn(java.util.Optional.of(rule3));
+        when(analyzerQcRuleDAO.update(any(AnalyzerQcRule.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AnalyzerQcRule updated = service.updateRule("1", "rule-003", new AnalyzerQcRule(), Boolean.TRUE, "1");
+
+        assertTrue(updated.isActive());
     }
 
     // ---- deleteRule ----

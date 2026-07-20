@@ -65,6 +65,10 @@ public class AnalyzerQcRuleRestController extends BaseRestController {
             @RequestBody Map<String, Object> body, HttpServletRequest request) {
         try {
             AnalyzerQcRule rule = mapToRule(body);
+            Boolean isActive = parseIsActive(body);
+            if (isActive != null) {
+                rule.setActive(isActive);
+            }
             AnalyzerQcRule created = analyzerQcRuleService.createRule(analyzerId, rule, getSysUserId(request));
             pushToBridge(analyzerId);
             return ResponseEntity.status(HttpStatus.CREATED).body(ruleToMap(created));
@@ -85,7 +89,8 @@ public class AnalyzerQcRuleRestController extends BaseRestController {
             @PathVariable String ruleId, @RequestBody Map<String, Object> body, HttpServletRequest request) {
         try {
             AnalyzerQcRule updates = mapToRule(body);
-            AnalyzerQcRule updated = analyzerQcRuleService.updateRule(analyzerId, ruleId, updates,
+            Boolean isActive = parseIsActive(body);
+            AnalyzerQcRule updated = analyzerQcRuleService.updateRule(analyzerId, ruleId, updates, isActive,
                     getSysUserId(request));
             pushToBridge(analyzerId);
             return ResponseEntity.ok(ruleToMap(updated));
@@ -159,13 +164,27 @@ public class AnalyzerQcRuleRestController extends BaseRestController {
         }
         rule.setTargetField((String) body.get("targetField"));
         rule.setOperand((String) body.get("operand"));
-        if (body.containsKey("isActive")) {
-            rule.setActive(Boolean.TRUE.equals(body.get("isActive")));
-        }
         if (body.get("displayOrder") instanceof Number n) {
             rule.setDisplayOrder(n.intValue());
         }
         rule.setDescription((String) body.get("description"));
         return rule;
+    }
+
+    /**
+     * LIS-297: activation state must be an explicit act. Absent key (or JSON null)
+     * means "leave unchanged"; any non-boolean JSON type is rejected rather than
+     * coerced — Boolean.TRUE.equals("true") used to silently deactivate.
+     */
+    private Boolean parseIsActive(Map<String, Object> body) {
+        Object value = body.get("isActive");
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        throw new IllegalArgumentException(
+                "isActive must be a JSON boolean (true/false), got " + value.getClass().getSimpleName());
     }
 }
