@@ -338,10 +338,12 @@
                    v.is_active, v.display_order, v.description, now()
               FROM clinlims.analyzer a
               CROSS JOIN (VALUES
+                    <!-- analyzer_qc_rule.description is VARCHAR(255); keep both strings under it.
+                         The unabridged rationale lives in the profile JSON. -->
                     ('FIELD_EQUALS', 'O.12', 'Q', true, 1,
-                     'PROVISIONAL (LIS-266 pending) — ASTM O-record action code O.12 = Q. Not wire-proven: no captured X3 O-record has yet carried a field this far. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.'),
+                     'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.'),
                     ('CALIBRATION_SPECIMEN_ID_PREFIX', NULL, 'CAL-', false, 2,
-                     'PROVISIONAL PLACEHOLDER (LIS-266 pending) — invented prefix, never observed from a real X3. Shipped INACTIVE so it cannot reclassify a patient specimen whose accession happens to start with CAL-; an admin must confirm the real convention before activating.')
+                     'PROVISIONAL PLACEHOLDER (LIS-266): invented prefix, never observed from a real X3. Shipped INACTIVE so it cannot reclassify a patient specimen whose accession starts with CAL-; an admin must confirm the real convention before activating.')
                  ) AS v(rule_type, target_field, operand, is_active, display_order, description)
              WHERE a.name = 'SNIBE MAGLUMI X3'
                AND NOT EXISTS (
