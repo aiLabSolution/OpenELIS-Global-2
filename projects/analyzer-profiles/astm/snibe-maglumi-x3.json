@@ -2,7 +2,7 @@
   "$schema": "https://openelis-global.org/schemas/analyzer-defaults/1.0",
   "profileMeta": {
     "id": "snibe-maglumi-x3",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "displayName": "SNIBE MAGLUMI X3",
     "manufacturer": "SNIBE (Shenzhen New Industries Biomedical Engineering)",
     "confidence": "LOW",
@@ -33,16 +33,28 @@
   },
   "default_test_mappings": [
     {
-      "test_code": "TSH",
-      "test_name_hint": "Thyroid Stimulating Hormone",
-      "loinc": "3016-3",
-      "unit": "uIU/mL"
+      "test_code": "FT3",
+      "test_name_hint": "Free Triiodothyronine",
+      "loinc": "14928-6",
+      "unit": "pmol/L",
+      "ucum": "pmol/L",
+      "notes": "LIS-299: 14928-6 is the [Moles/volume] (SCnc) code, matching the pmol/L the X3 reports. Do NOT use 3051-0 — that is [Mass/volume] (MCnc), the opposite axis."
     },
     {
-      "test_code": "FT4",
+      "test_code": "FT4 II",
       "test_name_hint": "Free Thyroxine",
-      "loinc": "14920-3",
-      "unit": "pmol/L"
+      "loinc": "3024-7",
+      "unit": "ng/dL",
+      "ucum": "ng/dL",
+      "notes": "LIS-299/LIS-307: the wire code carries a literal ' II' suffix, and the unit is ng/dL — this profile previously declared pmol/L, contradicting the bench capture. 3024-7 is the [Mass/volume] (MCnc) code matching ng/dL. Do NOT use 14920-3 — that is [Moles/volume] (SCnc), the opposite axis."
+    },
+    {
+      "test_code": "TSH II",
+      "test_name_hint": "Thyroid Stimulating Hormone",
+      "loinc": "3016-3",
+      "unit": "uIU/mL",
+      "ucum": "u[IU]/mL",
+      "notes": "LIS-299: the axis was already correct ([Units/volume] against uIU/mL); only the wire code gains its literal ' II' suffix."
     }
   ],
   "configDefaults": {
@@ -64,5 +76,5 @@
       }
     ]
   },
-  "notes": "GUARDED GO-LIVE scaffold for LIS-269/LIS-173, not a bench-verified profile. Every value in this file that claims to discriminate QC or calibration traffic is PROVISIONAL — pending LIS-266 chassis-attached QC capture to confirm the real X3 QC/calibration discriminator; do not treat as wire-proven. TSH/FT4 code-to-LOINC choices are the same synthetic seeds already carried in the bridge's configuration.yml ('real dictionary = LIS-38'), not a validated vendor dictionary. AFP and CEA are known X3 analytes deliberately left unmapped here (as in the bridge config) pending LIS-38 — do not guess LOINC codes for them. Authoring this profile makes the analyzer_qc_rule / QcRuleDto path provisioned end-to-end (LIS-173) instead of empty, which is what OE's registry full-replace sync (attachQcRules) needs to stop wiping the bridge's QC rules on every sync; it does NOT prove the discriminator is correct on real X3 wire traffic. Until LIS-266 lands, sites running this profile MUST follow the operator QC-review SOP (docs/runbooks/x3-qc-guarded-go-live.md) as the compensating control for QC/calibration misclassification risk."
+  "notes": "GUARDED GO-LIVE scaffold for LIS-269/LIS-173, not a bench-verified profile. Every value in this file that claims to discriminate QC or calibration traffic is PROVISIONAL — pending LIS-266 chassis-attached QC capture to confirm the real X3 QC/calibration discriminator; do not treat as wire-proven. default_test_mappings, by contrast, ARE bench-verified as of v0.2.0 (LIS-272): the three codes and units come from the archived LIS-75 captures under evidence/bench/maglumi-x3/ (FT3 5.43 pmol/L, 'FT4 II' 1.58 ng/dL, 'TSH II' 2.78 uIU/mL), and their LOINCs are the axis-corrected set from LIS-299. They replace the earlier synthetic TSH/FT4 seeds, which named the wrong wire codes (no ' II' suffix, and the bridge lookup is exact-match) and put FT4 on the wrong property axis at the wrong unit (LIS-307). The same dictionary is seeded durably in core by liquibase 063 and in the bridge by deploy/kit/compose/bridge-site.yml; all three must stay in step. AFP and CEA are known X3 analytes deliberately left unmapped here (as in the bridge config) pending LIS-38 — do not guess LOINC codes for them. Authoring this profile makes the analyzer_qc_rule / QcRuleDto path provisioned end-to-end (LIS-173) instead of empty, which is what OE's registry full-replace sync (attachQcRules) needs to stop wiping the bridge's QC rules on every sync; it does NOT prove the discriminator is correct on real X3 wire traffic. Until LIS-266 lands, sites running this profile MUST follow the operator QC-review SOP (docs/runbooks/x3-qc-guarded-go-live.md) as the compensating control for QC/calibration misclassification risk."
 }

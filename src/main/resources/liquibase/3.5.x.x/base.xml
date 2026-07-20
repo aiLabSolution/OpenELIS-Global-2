@@ -190,4 +190,7 @@
   <!-- LIS-271: record OE's own receive-time clock alongside complete_date (which stays derived from the analyzer's onboard clock, unchanged) so a wrong analyzer clock is provable, not just inferable. 060 and 061 are both taken by LIS-97 (merged) — renumbered 061->062. -->
   <include relativeToChangelogFile="true" file="062-analyzer-results-import-received-time.xml"/>
 
+  <!-- LIS-272: durable SNIBE MAGLUMI X3 seed — analyzer row + QC rules, the FT3/"FT4 II"/"TSH II" wire map on the LIS-299-corrected LOINC axes, immunoassay UOM/UCUM, and a raw-precision re-pass (054 is one-shot and cannot reach mappings added after it). Must run after 054. -->
+  <include relativeToChangelogFile="true" file="063-maglumi-x3-immunoassay-seed.xml"/>
+
 </databaseChangeLog>
