@@ -59,17 +59,24 @@
     <!-- operator config set in the OE Analyzer admin screen. The clobber only  -->
     <!-- fires once an operator commissions the X3 with its real IP; what makes -->
     <!-- that safe is that OE then pushes the RIGHT map and QC rules instead of -->
-    <!-- empty ones. That is what cs4-cs6 guarantee.                            -->
+    <!-- empty ones. That is what cs4/cs5 here plus the QC rules seeded in      -->
+    <!-- liquibase/analyzer/004-015 together guarantee.                         -->
     <!--                                                                    -->
-    <!-- QC RULES ARE SEEDED WITH THE ROW, NOT OPTIONAL (LIS-269). Since        -->
-    <!-- analyzer/004-013 became a no-op, QC rules come from                    -->
+    <!-- THE QC RULES ARE MANDATORY, AND THEY LIVE IN ANOTHER FILE (LIS-269).   -->
+    <!-- Since analyzer/004-013 became a no-op, QC rules come from              -->
     <!-- configDefaults.qcRules via AnalyzerServiceImpl.createQcRulesFromProfile -->
     <!-- — a RUNTIME path that runs on REST creation only. A liquibase-seeded    -->
-    <!-- row never traverses it, so without cs6 this seed would produce exactly  -->
-    <!-- the LIS-269 failure mode: an analyzer row that pushes qcRules=[] and    -->
-    <!-- wipes the bridge's QC entry on every sync, dropping control specimens   -->
-    <!-- into the patient stream. cs6 mirrors the profile's two rules verbatim   -->
-    <!-- so the seeded row and a profile-created row provision identically.      -->
+    <!-- row never traverses it, so an analyzer row with no rules pushes         -->
+    <!-- qcRules=[] and wipes the bridge's QC entry on every sync, dropping      -->
+    <!-- control specimens into the patient stream.                             -->
+    <!--                                                                    -->
+    <!-- They are NOT in this file because base-changelog.xml includes           -->
+    <!-- liquibase/3.5.x.x/base.xml BEFORE liquibase/analyzer/base.xml, and      -->
+    <!-- analyzer_qc_rule is created by the latter (004-012). A QC seed here     -->
+    <!-- finds no table, its preCondition fails, and onFail="MARK_RAN" records   -->
+    <!-- it as run while seeding nothing — silently, and never retried. That     -->
+    <!-- was observed against the real schema. See                               -->
+    <!-- liquibase/analyzer/004-015-seed-maglumi-x3-qc-rules.xml.                -->
     <!--                                                                    -->
     <!-- Identity reconciles with the profile (LIS-269 constraint 1):           -->
     <!-- analyzer_name "SNIBE MAGLUMI X3", identifier_pattern (?i)(maglumi|snibe). -->
@@ -272,8 +279,9 @@
             INSERT INTO clinlims.analyzer
                 (id, name, description, is_active, status, protocol_version, communication_mode,
                  analyzer_type, identifier_pattern, fhir_uuid, last_updated)
+            <!-- analyzer.description is VARCHAR(60) — keep this string under it. -->
             VALUES (nextval('clinlims.analyzer_seq'), 'SNIBE MAGLUMI X3',
-                    'SNIBE MAGLUMI X3 chemiluminescence immunoassay analyzer, native Online ASTM E1394-97',
+                    'SNIBE MAGLUMI X3 immunoassay analyzer (ASTM E1394-97)',
                     true, 'SETUP', 'ASTM_LIS2_A2', 'ANALYZER_INITIATED', 'IMMUNOASSAY',
                     '(?i)(maglumi|snibe)', gen_random_uuid(), now());
         </sql>
@@ -317,43 +325,6 @@
                 DELETE FROM clinlims.analyzer_test_map
                  WHERE analyzer_test_name IN ('FT3', 'FT4 II', 'TSH II')
                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
-            </sql>
-        </rollback>
-    </changeSet>
-
-    <changeSet id="lis272-006-seed-x3-qc-rules" author="labsolution">
-        <preConditions onFail="MARK_RAN">
-            <and>
-                <tableExists schemaName="clinlims" tableName="analyzer_qc_rule"/>
-                <sqlCheck expectedResult="1">
-                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
-                </sqlCheck>
-            </and>
-        </preConditions>
-        <comment>Seed the X3's QC identification rules alongside its analyzer row (LIS-272/LIS-269). MANDATORY, not cosmetic: createQcRulesFromProfile only runs on the REST creation path, so a liquibase-seeded row would otherwise push qcRules=[] and wipe the bridge's QC entry on every sync — control specimens would then fall through into the patient stream. Values mirror projects/analyzer-profiles/astm/snibe-maglumi-x3.json verbatim, including the deliberately INACTIVE calibration placeholder, so a seeded row and a profile-created row provision identically.</comment>
-        <sql>
-            INSERT INTO clinlims.analyzer_qc_rule
-                (id, analyzer_id, rule_type, target_field, operand, is_active, display_order, description, last_updated)
-            SELECT gen_random_uuid()::varchar, a.id, v.rule_type, v.target_field, v.operand,
-                   v.is_active, v.display_order, v.description, now()
-              FROM clinlims.analyzer a
-              CROSS JOIN (VALUES
-                    <!-- analyzer_qc_rule.description is VARCHAR(255); keep both strings under it.
-                         The unabridged rationale lives in the profile JSON. -->
-                    ('FIELD_EQUALS', 'O.12', 'Q', true, 1,
-                     'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.'),
-                    ('CALIBRATION_SPECIMEN_ID_PREFIX', NULL, 'CAL-', false, 2,
-                     'PROVISIONAL PLACEHOLDER (LIS-266): invented prefix, never observed from a real X3. Shipped INACTIVE so it cannot reclassify a patient specimen whose accession starts with CAL-; an admin must confirm the real convention before activating.')
-                 ) AS v(rule_type, target_field, operand, is_active, display_order, description)
-             WHERE a.name = 'SNIBE MAGLUMI X3'
-               AND NOT EXISTS (
-                    SELECT 1 FROM clinlims.analyzer_qc_rule r
-                     WHERE r.analyzer_id = a.id AND r.rule_type = v.rule_type);
-        </sql>
-        <rollback>
-            <sql>
-                DELETE FROM clinlims.analyzer_qc_rule
-                 WHERE analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
             </sql>
         </rollback>
     </changeSet>

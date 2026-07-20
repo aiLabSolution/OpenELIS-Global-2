@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-272 — QC identification rules for the seeded MAGLUMI X3          -->
+    <!--                                                                    -->
+    <!-- This belongs to the 063 seed (3.5.x.x) and was originally written    -->
+    <!-- there. It lives HERE instead for an ordering reason worth stating,   -->
+    <!-- because getting it wrong fails silently:                            -->
+    <!--                                                                    -->
+    <!--   base-changelog.xml includes liquibase/3.5.x.x/base.xml BEFORE      -->
+    <!--   liquibase/analyzer/base.xml, and analyzer_qc_rule is created by    -->
+    <!--   004-012 in the latter. A QC-rule seed placed in 063 therefore      -->
+    <!--   finds no analyzer_qc_rule table, its preCondition fails, and       -->
+    <!--   onFail="MARK_RAN" records it as run WITHOUT seeding anything.      -->
+    <!--   It is then never retried — the rules are permanently absent, with  -->
+    <!--   only an INFO line in the migration log to say so. Observed         -->
+    <!--   exactly this way against the real schema before the move.          -->
+    <!--                                                                    -->
+    <!-- Why the rules must exist at all (LIS-269): since 004-013 became a    -->
+    <!-- no-op, QC rules are created from configDefaults.qcRules by           -->
+    <!-- AnalyzerServiceImpl.createQcRulesFromProfile — a RUNTIME path that   -->
+    <!-- runs on REST creation only. A liquibase-seeded analyzer row never    -->
+    <!-- traverses it. BridgeRegistrationService.attachQcRules then builds    -->
+    <!-- its payload from getActiveRuleDtosForAnalyzer and ALWAYS attaches    -->
+    <!-- qcRules (empty list when there are none), which the bridge reads as  -->
+    <!-- "clear my rules". So a seeded row with no rules wipes the bridge's   -->
+    <!-- QC entry on every sync and drops control specimens into the patient  -->
+    <!-- stream. These rows are what stop that.                              -->
+    <!--                                                                    -->
+    <!-- Values mirror projects/analyzer-profiles/astm/snibe-maglumi-x3.json  -->
+    <!-- verbatim, so a seeded row and a profile-created row provision        -->
+    <!-- identically. Only ACTIVE rules are pushed to the bridge, so the      -->
+    <!-- inactive calibration placeholder is reviewable in the admin UI but   -->
+    <!-- can never fire on live traffic.                                     -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis272-008-seed-maglumi-x3-qc-rules" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_qc_rule"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Seed the MAGLUMI X3 QC identification rules alongside the analyzer row 063 creates (LIS-272/LIS-269). Runs here rather than in 063 because analyzer_qc_rule does not exist yet at 3.5.x.x time — see the header.</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_qc_rule
+                (id, analyzer_id, rule_type, target_field, operand, is_active, display_order, description, last_updated)
+            SELECT gen_random_uuid()::varchar, a.id, v.rule_type, v.target_field, v.operand,
+                   v.is_active, v.display_order, v.description, now()
+              FROM clinlims.analyzer a
+              CROSS JOIN (VALUES
+                    <!-- analyzer_qc_rule.description is VARCHAR(255); keep both strings under it.
+                         The unabridged rationale lives in the profile JSON. -->
+                    ('FIELD_EQUALS', 'O.12', 'Q', true, 1,
+                     'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.'),
+                    ('CALIBRATION_SPECIMEN_ID_PREFIX', NULL, 'CAL-', false, 2,
+                     'PROVISIONAL PLACEHOLDER (LIS-266): invented prefix, never observed from a real X3. Shipped INACTIVE so it cannot reclassify a patient specimen whose accession starts with CAL-; an admin must confirm the real convention before activating.')
+                 ) AS v(rule_type, target_field, operand, is_active, display_order, description)
+             WHERE a.name = 'SNIBE MAGLUMI X3'
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_qc_rule r
+                     WHERE r.analyzer_id = a.id AND r.rule_type = v.rule_type);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_qc_rule
+                 WHERE analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

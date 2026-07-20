@@ -117,15 +117,21 @@
             <column name="id" type="numeric(10,0)">
                 <constraints primaryKey="true" nullable="false" />
             </column>
-            <column name="name" type="VARCHAR(100)" />
-            <column name="description" type="VARCHAR(255)" />
+            <!-- Widths MUST mirror production, not be invented. This fixture originally
+                guessed description as VARCHAR(255); production is VARCHAR(60), so an 83-char
+                seed string passed here and then failed the real migration in CI, taking
+                every integration test down with it at context init. Sources: 3.4.x.x/002-modify-analyzer-table.xml
+                (ip_address 15, protocol_version 20, status 20, identifier_pattern 255),
+                3.4.14.x/005 (communication_mode 25). -->
+            <column name="name" type="VARCHAR(60)" />
+            <column name="description" type="VARCHAR(60)" />
             <column name="is_active" type="BOOLEAN" />
-            <column name="status" type="VARCHAR(30)" />
-            <column name="protocol_version" type="VARCHAR(30)" />
-            <column name="communication_mode" type="VARCHAR(30)" />
+            <column name="status" type="VARCHAR(20)" />
+            <column name="protocol_version" type="VARCHAR(20)" />
+            <column name="communication_mode" type="VARCHAR(25)" />
             <column name="analyzer_type" type="VARCHAR(40)" />
             <column name="identifier_pattern" type="VARCHAR(255)" />
-            <column name="ip_address" type="VARCHAR(60)" />
+            <column name="ip_address" type="VARCHAR(15)" />
             <column name="port" type="INT" />
             <column name="fhir_uuid" type="UUID" />
             <column name="last_updated" type="TIMESTAMP" />
@@ -150,50 +156,6 @@
             CASCADE;
         </sql>
 
-        <createTable schemaName="clinlims"
-            tableName="analyzer_qc_rule">
-            <column name="id" type="VARCHAR(36)">
-                <constraints primaryKey="true" nullable="false" />
-            </column>
-            <column name="analyzer_id" type="numeric(10,0)">
-                <constraints nullable="false" />
-            </column>
-            <column name="rule_type" type="VARCHAR(40)">
-                <constraints nullable="false" />
-            </column>
-            <column name="target_field" type="VARCHAR(100)" />
-            <column name="operand" type="VARCHAR(500)">
-                <constraints nullable="false" />
-            </column>
-            <column name="is_active" type="BOOLEAN"
-                defaultValueBoolean="true">
-                <constraints nullable="false" />
-            </column>
-            <column name="display_order" type="INT"
-                defaultValueNumeric="0">
-                <constraints nullable="false" />
-            </column>
-            <column name="description" type="VARCHAR(255)" />
-            <column name="sys_user_id" type="VARCHAR(36)" />
-            <column name="last_updated" type="TIMESTAMP"
-                defaultValueComputed="NOW()">
-                <constraints nullable="false" />
-            </column>
-        </createTable>
-
-        <sql>
-            ALTER TABLE clinlims.analyzer_qc_rule
-            ADD CONSTRAINT fk_analyzer_qc_rule_analyzer
-            FOREIGN KEY (analyzer_id) REFERENCES clinlims.analyzer(id) ON DELETE
-            CASCADE;
-
-            ALTER TABLE clinlims.analyzer_qc_rule
-            ADD CONSTRAINT chk_qc_rule_type
-            CHECK (rule_type IN ('FIELD_EQUALS', 'SPECIMEN_ID_PREFIX',
-            'SPECIMEN_ID_PATTERN', 'FIELD_CONTAINS',
-            'CALIBRATION_FIELD_EQUALS', 'CALIBRATION_FIELD_CONTAINS',
-            'CALIBRATION_SPECIMEN_ID_PREFIX', 'CALIBRATION_SPECIMEN_ID_PATTERN'));
-        </sql>
     </changeSet>
 
     <changeSet id="lis272-test-baseline-catalog"
@@ -235,5 +197,63 @@
 
     <include
         file="liquibase/3.5.x.x/063-maglumi-x3-immunoassay-seed.xml" />
+
+    <!-- analyzer_qc_rule is created only HERE, AFTER 063, because that is the
+        real ordering: base-changelog.xml includes liquibase/3.5.x.x/base.xml before
+        liquibase/analyzer/base.xml, where 004-012 creates this table. Modelling
+        that faithfully is what lets this fixture catch a QC seed misplaced back
+        into 063 — it would find no table, MARK_RAN silently, and the QC assertions
+        would fail. Definition mirrors 004-012 plus 004-014's widening for CALIBRATION_*
+        types. -->
+    <changeSet id="lis272-test-create-qc-rule-table"
+        author="labsolution">
+        <createTable schemaName="clinlims"
+            tableName="analyzer_qc_rule">
+            <column name="id" type="VARCHAR(36)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="analyzer_id" type="numeric(10,0)">
+                <constraints nullable="false" />
+            </column>
+            <column name="rule_type" type="VARCHAR(40)">
+                <constraints nullable="false" />
+            </column>
+            <column name="target_field" type="VARCHAR(100)" />
+            <column name="operand" type="VARCHAR(500)">
+                <constraints nullable="false" />
+            </column>
+            <column name="is_active" type="BOOLEAN"
+                defaultValueBoolean="true">
+                <constraints nullable="false" />
+            </column>
+            <column name="display_order" type="INT"
+                defaultValueNumeric="0">
+                <constraints nullable="false" />
+            </column>
+            <column name="description" type="VARCHAR(255)" />
+            <column name="sys_user_id" type="VARCHAR(36)" />
+            <column name="last_updated" type="TIMESTAMP"
+                defaultValueComputed="NOW()">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+        <sql>
+            ALTER TABLE clinlims.analyzer_qc_rule
+            ADD CONSTRAINT fk_analyzer_qc_rule_analyzer
+            FOREIGN KEY (analyzer_id) REFERENCES clinlims.analyzer(id) ON DELETE
+            CASCADE;
+
+            ALTER TABLE clinlims.analyzer_qc_rule
+            ADD CONSTRAINT chk_qc_rule_type
+            CHECK (rule_type IN ('FIELD_EQUALS', 'SPECIMEN_ID_PREFIX',
+            'SPECIMEN_ID_PATTERN',
+            'FIELD_CONTAINS', 'CALIBRATION_FIELD_EQUALS', 'CALIBRATION_FIELD_CONTAINS',
+            'CALIBRATION_SPECIMEN_ID_PREFIX',
+            'CALIBRATION_SPECIMEN_ID_PATTERN'));
+        </sql>
+    </changeSet>
+
+    <include
+        file="liquibase/analyzer/004-015-seed-maglumi-x3-qc-rules.xml" />
 
 </databaseChangeLog>
