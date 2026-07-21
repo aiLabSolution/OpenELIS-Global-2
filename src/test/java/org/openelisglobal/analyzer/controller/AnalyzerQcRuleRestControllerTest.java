@@ -46,6 +46,7 @@ public class AnalyzerQcRuleRestControllerTest extends BaseWebContextSensitiveTes
     private Object originalBridgeService;
 
     @Before
+    @Override
     public void setUp() throws Exception {
         super.setUp();
         mockMvc = MockMvcBuilders.webAppContextSetup(this.webApplicationContext).apply(springSecurity()).build();
