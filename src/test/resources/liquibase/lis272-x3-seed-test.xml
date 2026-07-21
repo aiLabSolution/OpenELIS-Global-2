@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- Focused changelog for MaglumiX3SeedMigrationTest: the minimum pre-LIS-272
+        schema that changeset 063 touches, then 063 itself. Mirrors the shape of
+        liquibase/lis97-rollback-archive-test.xml. -->
+
+    <changeSet id="lis272-test-setup" author="labsolution">
+        <sql>CREATE SCHEMA clinlims</sql>
+
+        <createSequence schemaName="clinlims"
+            sequenceName="unit_of_measure_seq" startValue="1" />
+        <createSequence schemaName="clinlims"
+            sequenceName="test_seq" startValue="1" />
+        <createSequence schemaName="clinlims"
+            sequenceName="sample_type_test_seq" startValue="1" />
+        <createSequence schemaName="clinlims"
+            sequenceName="test_result_seq" startValue="1" />
+        <createSequence schemaName="clinlims"
+            sequenceName="analyzer_seq" startValue="1" />
+
+        <createTable schemaName="clinlims"
+            tableName="unit_of_measure">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="name" type="VARCHAR(60)" />
+            <column name="description" type="VARCHAR(60)" />
+            <column name="code" type="VARCHAR(40)" />
+            <column name="ucum_code" type="VARCHAR(40)" />
+            <column name="is_active" type="VARCHAR(1)" />
+            <column name="lastupdated" type="TIMESTAMP" />
+        </createTable>
+
+        <createTable schemaName="clinlims"
+            tableName="test_section">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="name" type="VARCHAR(60)" />
+            <column name="description" type="VARCHAR(60)" />
+        </createTable>
+
+        <createTable schemaName="clinlims"
+            tableName="type_of_sample">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="description" type="VARCHAR(60)" />
+            <column name="local_abbrev" type="VARCHAR(60)" />
+        </createTable>
+
+        <createTable schemaName="clinlims" tableName="test">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="name" type="VARCHAR(60)" />
+            <column name="description" type="VARCHAR(200)" />
+            <column name="reporting_description" type="VARCHAR(200)" />
+            <column name="loinc" type="VARCHAR(80)" />
+            <column name="is_active" type="VARCHAR(1)" />
+            <column name="orderable" type="BOOLEAN" />
+            <column name="test_section_id" type="numeric(10,0)" />
+            <column name="uom_id" type="numeric(10,0)" />
+            <column name="local_code" type="VARCHAR(60)" />
+            <column name="sort_order" type="INT" />
+            <column name="guid" type="VARCHAR(36)" />
+            <column name="lastupdated" type="TIMESTAMP" />
+        </createTable>
+
+        <createTable schemaName="clinlims"
+            tableName="sampletype_test">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="sample_type_id" type="numeric(10,0)" />
+            <column name="test_id" type="numeric(10,0)" />
+            <column name="is_panel" type="BOOLEAN" />
+            <column name="display_order" type="INT" />
+        </createTable>
+
+        <createTable schemaName="clinlims" tableName="test_result">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="test_id" type="numeric(10,0)" />
+            <column name="result_group" type="VARCHAR(10)" />
+            <column name="flags" type="VARCHAR(10)" />
+            <column name="tst_rslt_type" type="VARCHAR(10)" />
+            <column name="value" type="VARCHAR(200)" />
+            <column name="significant_digits" type="INT" />
+            <column name="quant_limit" type="VARCHAR(20)" />
+            <column name="cont_level" type="VARCHAR(20)" />
+            <column name="scriptlet_id" type="numeric(10,0)" />
+            <column name="sort_order" type="INT" />
+            <column name="is_quantifiable" type="VARCHAR(1)" />
+            <column name="is_active" type="VARCHAR(1)" />
+            <column name="is_normal" type="VARCHAR(1)" />
+            <column name="lastupdated" type="TIMESTAMP" />
+        </createTable>
+
+        <createTable schemaName="clinlims"
+            tableName="test_result_component">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="test_id" type="numeric(10,0)" />
+            <column name="result_type" type="VARCHAR(10)" />
+            <column name="significant_digits" type="INT" />
+        </createTable>
+
+        <createTable schemaName="clinlims" tableName="analyzer">
+            <column name="id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <!-- Widths MUST mirror production, not be invented. This fixture originally
+                guessed description as VARCHAR(255); production is VARCHAR(60), so an 83-char
+                seed string passed here and then failed the real migration in CI, taking
+                every integration test down with it at context init. Sources: 3.4.x.x/002-modify-analyzer-table.xml
+                (ip_address 15, protocol_version 20, status 20, identifier_pattern 255),
+                3.4.14.x/005 (communication_mode 25). -->
+            <column name="name" type="VARCHAR(60)" />
+            <column name="description" type="VARCHAR(60)" />
+            <column name="is_active" type="BOOLEAN" />
+            <column name="status" type="VARCHAR(20)" />
+            <column name="protocol_version" type="VARCHAR(20)" />
+            <column name="communication_mode" type="VARCHAR(25)" />
+            <column name="analyzer_type" type="VARCHAR(40)" />
+            <column name="identifier_pattern" type="VARCHAR(255)" />
+            <column name="ip_address" type="VARCHAR(15)" />
+            <column name="port" type="INT" />
+            <column name="fhir_uuid" type="UUID" />
+            <column name="last_updated" type="TIMESTAMP" />
+        </createTable>
+
+        <createTable schemaName="clinlims"
+            tableName="analyzer_test_map">
+            <column name="analyzer_id" type="numeric(10,0)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="analyzer_test_name" type="VARCHAR(100)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="test_id" type="numeric(10,0)" />
+            <column name="last_updated" type="TIMESTAMP" />
+        </createTable>
+
+        <sql>
+            ALTER TABLE clinlims.analyzer_test_map
+            ADD CONSTRAINT analyzer_test_map_analyzer_fk
+            FOREIGN KEY (analyzer_id) REFERENCES clinlims.analyzer(id) ON DELETE
+            CASCADE;
+        </sql>
+
+    </changeSet>
+
+    <changeSet id="lis272-test-baseline-catalog"
+        author="labsolution">
+        <comment>
+            Baseline reference data present before LIS-272 on a real deployment.
+
+            The TSH row is the important one: it stands for a LOINC-bearing catalog
+            test that already existed and whose test_result was left at
+            significant_digits = 2 because LIS-188's changeset 054 ran BEFORE any
+            X3
+            mapping existed. 054 is a one-shot UPDATE keyed on analyzer_test_map
+            membership at migration time, so it could not reach this row. 063 cs7
+            must, or the X3's decimals are rounded away on accept.
+        </comment>
+        <sql>
+            <!-- A site-owned UOM that cs1 adopts and widens. Its description is deliberately
+                not the seed marker, so rollback must preserve it. -->
+            INSERT INTO clinlims.unit_of_measure
+            (id, name, description, code, is_active, lastupdated)
+            VALUES (900, 'pmol/L', 'Site catalog pmol/L', NULL, 'Y', now());
+
+            INSERT INTO clinlims.test_section (id, name, description)
+            VALUES (1, 'Immunology', 'Immunology logbook');
+
+            INSERT INTO clinlims.type_of_sample (id, description, local_abbrev)
+            VALUES (1, 'Serum', 'Serum');
+
+            INSERT INTO clinlims.test
+            (id, name, description, loinc, is_active, orderable, local_code, guid,
+            lastupdated)
+            <!-- Deliberately RETIRED (is_active='N', orderable=false): stands for
+                a Test a lab took out of service. Adopting it must not quietly put it back
+                into service. Its local_code also deliberately matches the seed's target,
+                proving that only the seed GUID — never local_code — establishes rollback
+                ownership. See retiredCatalogTestIsNotSilentlyReactivated(). -->
+            VALUES (900, 'TSH', 'TSH(Serum)', '3016-3', 'N', false,
+            'X3-TSHII-Serum', '11100000-0000-4000-8000-000000000900',
+            now());
+
+            INSERT INTO clinlims.test_result
+            (id, test_id, tst_rslt_type, significant_digits, sort_order,
+            is_quantifiable, is_active, is_normal, lastupdated)
+            VALUES (900, 900, 'N', 2, 1, 'f', 't', 'f', now());
+
+            INSERT INTO clinlims.test_result_component (id, test_id, result_type,
+            significant_digits)
+            VALUES (900, 900, 'N', 2);
+
+            <!-- A numeric test belonging to a DIFFERENT analyzer, at a hand-set precision.
+                It must be mapped to something, otherwise 054's global predicate would skip
+                it too and the scoping assertion would prove nothing. This is the row that
+                distinguishes "re-pass scoped to the X3" from "re-pass over every analyzer's
+                mapped tests" — see precisionRepassDoesNotTouchTestsOutsideTheX3Map(). -->
+            INSERT INTO clinlims.analyzer
+            (id, name, description, is_active, status, last_updated)
+            VALUES (800, 'OTHER ANALYZER', 'unrelated analyzer', true, 'SETUP', now());
+
+            INSERT INTO clinlims.test
+            (id, name, description, loinc, is_active, orderable, local_code,
+            lastupdated)
+            VALUES (901, 'Other Glucose', 'Other Glucose(Serum)', '2345-7', 'Y', true,
+            'CATALOG-OTHER-GLU', now());
+
+            INSERT INTO clinlims.analyzer_test_map
+            (analyzer_id, analyzer_test_name, test_id, last_updated)
+            VALUES (800, 'GLU', 901, now());
+
+            INSERT INTO clinlims.test_result
+            (id, test_id, tst_rslt_type, significant_digits, sort_order,
+            is_quantifiable, is_active, is_normal, lastupdated)
+            VALUES (901, 901, 'N', 2, 1, 'f', 't', 'f', now());
+        </sql>
+    </changeSet>
+
+    <include
+        file="liquibase/3.5.x.x/063-maglumi-x3-immunoassay-seed.xml" />
+
+    <!-- analyzer_qc_rule is created only HERE, AFTER 063, because that is the
+        real ordering: base-changelog.xml includes liquibase/3.5.x.x/base.xml before
+        liquibase/analyzer/base.xml, where 004-012 creates this table. Modelling
+        that faithfully is what lets this fixture catch a QC seed misplaced back
+        into 063 — it would find no table, MARK_RAN silently, and the QC assertions
+        would fail. Definition mirrors 004-012 plus 004-014's widening for CALIBRATION_*
+        types. -->
+    <changeSet id="lis272-test-create-qc-rule-table"
+        author="labsolution">
+        <createTable schemaName="clinlims"
+            tableName="analyzer_qc_rule">
+            <column name="id" type="VARCHAR(36)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="analyzer_id" type="numeric(10,0)">
+                <constraints nullable="false" />
+            </column>
+            <column name="rule_type" type="VARCHAR(40)">
+                <constraints nullable="false" />
+            </column>
+            <column name="target_field" type="VARCHAR(100)" />
+            <column name="operand" type="VARCHAR(500)">
+                <constraints nullable="false" />
+            </column>
+            <column name="is_active" type="BOOLEAN"
+                defaultValueBoolean="true">
+                <constraints nullable="false" />
+            </column>
+            <column name="display_order" type="INT"
+                defaultValueNumeric="0">
+                <constraints nullable="false" />
+            </column>
+            <column name="description" type="VARCHAR(255)" />
+            <column name="sys_user_id" type="VARCHAR(36)" />
+            <column name="last_updated" type="TIMESTAMP"
+                defaultValueComputed="NOW()">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+        <sql>
+            ALTER TABLE clinlims.analyzer_qc_rule
+            ADD CONSTRAINT fk_analyzer_qc_rule_analyzer
+            FOREIGN KEY (analyzer_id) REFERENCES clinlims.analyzer(id) ON DELETE
+            CASCADE;
+
+            ALTER TABLE clinlims.analyzer_qc_rule
+            ADD CONSTRAINT chk_qc_rule_type
+            CHECK (rule_type IN ('FIELD_EQUALS', 'SPECIMEN_ID_PREFIX',
+            'SPECIMEN_ID_PATTERN',
+            'FIELD_CONTAINS', 'CALIBRATION_FIELD_EQUALS', 'CALIBRATION_FIELD_CONTAINS',
+            'CALIBRATION_SPECIMEN_ID_PREFIX',
+            'CALIBRATION_SPECIMEN_ID_PATTERN'));
+        </sql>
+        <!-- Explicit: the raw ALTERs above have no inverse, so without this a
+            rollback through this changeset fails and the production rollback blocks
+            below could never be exercised at all. -->
+        <rollback>
+            <dropTable schemaName="clinlims"
+                tableName="analyzer_qc_rule" />
+        </rollback>
+    </changeSet>
+
+    <include
+        file="liquibase/analyzer/004-015-seed-maglumi-x3-qc-rules.xml" />
+
+</databaseChangeLog>

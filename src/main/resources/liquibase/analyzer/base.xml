@@ -9,5 +9,8 @@
   <include relativeToChangelogFile="true" file="004-013-seed-default-qc-rules.xml"/>
   <!-- LIS-173: express CALIBRATION_* rule types (calibration gate provisioning) -->
   <include relativeToChangelogFile="true" file="004-014-add-calibration-qc-rule-types.xml"/>
+  <!-- LIS-272: QC rules for the MAGLUMI X3 row seeded by 3.5.x.x/063. Must run after
+       004-012 creates analyzer_qc_rule, which is why it is not in 063 itself. -->
+  <include relativeToChangelogFile="true" file="004-015-seed-maglumi-x3-qc-rules.xml"/>
 
 </databaseChangeLog>

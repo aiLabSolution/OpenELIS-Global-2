@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-272 — SNIBE MAGLUMI X3 durable immunoassay seed                  -->
+    <!--                                                                    -->
+    <!-- Core shipped no versioned X3 identity at all: no clinlims.analyzer    -->
+    <!-- row, no analyzer_test_map, no immunoassay LOINC/UCUM catalog — unlike -->
+    <!-- every EDAN unit (052/053/055/058). Consequences this closes:          -->
+    <!--                                                                    -->
+    <!--  * The first X3 upload auto-creates a PENDING_REGISTRATION stub from  -->
+    <!--    the bundle Device source-ip (AnalyzerFhirImportController          -->
+    <!--    .findOrCreateStubFromDevice). With no profile or test map the      -->
+    <!--    results land un-LOINCed in read-only staging, and QC processing     -->
+    <!--    fails on a null testId.                                            -->
+    <!--  * The Stage-4 e2e (deploy/kit/scripts/prove-site-x3-e2e.sh) only      -->
+    <!--    passed because it INSERTed the analyzer + map itself, mapping the   -->
+    <!--    three wire codes onto three ARBITRARY LOINC-bearing catalog tests.  -->
+    <!--    That proved the plumbing, never the clinical coding.                -->
+    <!--                                                                    -->
+    <!-- WIRE TRUTH (bench-verified by LIS-75 capture session                  -->
+    <!-- 20260717-0101010034012301113, raw capture SHA-256                      -->
+    <!-- 2c50acec48e69f8e24f1abadde11820e284c656a856e74e9a4fca01679900076;    -->
+    <!-- re-confirmed by LIS-38):                                               -->
+    <!--   FT3     / pmol/L                                                     -->
+    <!--   FT4 II  / ng/dL      <- note the literal " II" suffix               -->
+    <!--   TSH II  / uIU/mL     <- likewise                                    -->
+    <!-- The suffixes are part of the code the analyzer puts on the wire, and   -->
+    <!-- the bridge's code->LOINC lookup is EXACT-MATCH, so 'FT4' and 'FT4 II'  -->
+    <!-- are different keys. Seeding the un-suffixed forms would resolve none   -->
+    <!-- of the real traffic.                                                  -->
+    <!--                                                                    -->
+    <!-- LOINC AXIS (LIS-299 — the corrected codes, not the ones this repo      -->
+    <!-- carried before). Two of the three analytes were mapped to a code whose -->
+    <!-- property axis contradicted the unit the analyzer reports, in OPPOSITE  -->
+    <!-- directions, so there is no panel-wide convention to apply:             -->
+    <!--   FT3    pmol/L  is substance concentration -> 14928-6 (SCnc).         -->
+    <!--          NOT 3051-0, which is MCnc (mass/volume).                      -->
+    <!--   FT4 II ng/dL   is mass concentration      -> 3024-7  (MCnc).         -->
+    <!--          NOT 14920-3, which is SCnc (moles/volume).                    -->
+    <!--   TSH II uIU/mL  is units/volume            -> 3016-3  (unchanged).    -->
+    <!-- Seeding the catalog is precisely the step that would have turned that  -->
+    <!-- latent defect into a live one: before this changeset no OpenELIS Test  -->
+    <!-- carried any of these codes, so resolveLoincTest returned null and rows -->
+    <!-- staged read-only as unmapped_loinc. Once a Test carries the code, the  -->
+    <!-- code reaches patient-facing FHIR and downstream HIS ORU OBX-3, where a -->
+    <!-- LOINC-keyed consumer reads a wrong-axis value as grossly abnormal.     -->
+    <!--                                                                    -->
+    <!-- TRANSPORT IS NOT SEEDED, deliberately. LIS-272's problem statement     -->
+    <!-- notes that seeding the OE analyzer row "with ip_address" would also    -->
+    <!-- settle the bridge registry full-replace wipe (LIS-268/LIS-269): OE     -->
+    <!-- becomes the source of truth, so OE-wins stops being a data-loss bug.   -->
+    <!-- The wipe is fixed here, but by seeding the MAP and the QC RULES rather -->
+    <!-- than an IP. The site IP is deployment-specific (the kit's placeholder  -->
+    <!-- is 192.0.2.10, TEST-NET-1) and would be wrong at every real site, and  -->
+    <!-- the EDAN seeds 052/053 set the same precedent that transport is        -->
+    <!-- operator config set in the OE Analyzer admin screen. The clobber only  -->
+    <!-- fires once an operator commissions the X3 with its real IP; what makes -->
+    <!-- that safe is that OE then pushes the RIGHT map and QC rules instead of -->
+    <!-- empty ones. That is what cs4/cs5 here plus the QC rules seeded in      -->
+    <!-- liquibase/analyzer/004-015 together guarantee.                         -->
+    <!--                                                                    -->
+    <!-- THE QC RULES ARE MANDATORY, AND THEY LIVE IN ANOTHER FILE (LIS-269).   -->
+    <!-- Since analyzer/004-013 became a no-op, QC rules come from              -->
+    <!-- configDefaults.qcRules via AnalyzerServiceImpl.createQcRulesFromProfile -->
+    <!-- — a RUNTIME path that runs on REST creation only. A liquibase-seeded    -->
+    <!-- row never traverses it, so an analyzer row with no rules pushes         -->
+    <!-- qcRules=[] and wipes the bridge's QC entry on every sync, dropping      -->
+    <!-- control specimens into the patient stream.                             -->
+    <!--                                                                    -->
+    <!-- They are NOT in this file because base-changelog.xml includes           -->
+    <!-- liquibase/3.5.x.x/base.xml BEFORE liquibase/analyzer/base.xml, and      -->
+    <!-- analyzer_qc_rule is created by the latter (004-012). A QC seed here     -->
+    <!-- finds no table, its preCondition fails, and onFail="MARK_RAN" records   -->
+    <!-- it as run while seeding nothing — silently, and never retried. That     -->
+    <!-- was observed against the real schema. See                               -->
+    <!-- liquibase/analyzer/004-015-seed-maglumi-x3-qc-rules.xml.                -->
+    <!--                                                                    -->
+    <!-- Identity reconciles with the profile (LIS-269 constraint 1):           -->
+    <!-- analyzer_name "SNIBE MAGLUMI X3", identifier_pattern (?i)(maglumi|snibe). -->
+    <!--                                                                    -->
+    <!-- All changesets are idempotent (preConditions / NOT EXISTS guards), have -->
+    <!-- no context attribute so they reach the integration-test harness, and    -->
+    <!-- carry an explicit rollback — same conventions as 049/050/052/053.       -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis272-001-seed-x3-immunoassay-units" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="unit_of_measure"/>
+                <columnExists schemaName="clinlims" tableName="unit_of_measure" columnName="code"/>
+                <columnExists schemaName="clinlims" tableName="unit_of_measure" columnName="ucum_code"/>
+            </and>
+        </preConditions>
+        <comment>Ensure the three X3 result units exist as OpenELIS UOM rows carrying UCUM codes (LIS-272). uIU/mL is the one non-identity mapping: its UCUM form is u[IU]/mL, matching the bridge's unitToUcum in deploy/kit/compose/bridge-site.yml. The no-config UCUM fallback in the bridge lacked ng/dL entirely.</comment>
+        <sql>
+            WITH x3_units(unit_name, unit_code, ucum_code) AS (
+                VALUES
+                    ('pmol/L',  'pmol/L',  'pmol/L'),
+                    ('ng/dL',   'ng/dL',   'ng/dL'),
+                    ('uIU/mL',  'uIU/mL',  'u[IU]/mL')
+            )
+            UPDATE clinlims.unit_of_measure u
+               SET code = v.unit_code,
+                   ucum_code = v.ucum_code,
+                   is_active = 'Y',
+                   lastupdated = now()
+              FROM x3_units v
+             WHERE u.id = (
+                    SELECT min(u2.id) FROM clinlims.unit_of_measure u2
+                     WHERE lower(u2.name) = lower(v.unit_name)
+                        OR lower(u2.description) = lower(v.unit_name));
+
+            WITH x3_units(unit_name, unit_code, ucum_code) AS (
+                VALUES
+                    ('pmol/L',  'pmol/L',  'pmol/L'),
+                    ('ng/dL',   'ng/dL',   'ng/dL'),
+                    ('uIU/mL',  'uIU/mL',  'u[IU]/mL')
+            )
+            INSERT INTO clinlims.unit_of_measure (id, name, description, lastupdated, code, ucum_code, is_active)
+            SELECT nextval('clinlims.unit_of_measure_seq'), v.unit_name,
+                   'LIS-272 X3 seed: ' || v.unit_name, now(),
+                   v.unit_code, v.ucum_code, 'Y'
+              FROM x3_units v
+             WHERE NOT EXISTS (
+                    SELECT 1 FROM clinlims.unit_of_measure u
+                     WHERE lower(u.name) = lower(v.unit_name)
+                        OR lower(u.description) = lower(v.unit_name)
+                        OR u.code = v.unit_code);
+        </sql>
+        <rollback>
+            <!-- The seed-only description distinguishes inserted rows from pre-existing
+                 UOMs that the UPDATE above widened with code/UCUM metadata. Widening is
+                 non-lossy and deliberately survives rollback. -->
+            <sql>
+                DELETE FROM clinlims.unit_of_measure
+                 WHERE (name, description, code, ucum_code) IN (
+                        ('pmol/L', 'LIS-272 X3 seed: pmol/L', 'pmol/L', 'pmol/L'),
+                        ('ng/dL',  'LIS-272 X3 seed: ng/dL',  'ng/dL',  'ng/dL'),
+                        ('uIU/mL', 'LIS-272 X3 seed: uIU/mL', 'uIU/mL', 'u[IU]/mL'));
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-002-seed-x3-thyroid-tests" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="test"/>
+                <tableExists schemaName="clinlims" tableName="sampletype_test"/>
+                <tableExists schemaName="clinlims" tableName="type_of_sample"/>
+                <columnExists schemaName="clinlims" tableName="test" columnName="loinc"/>
+            </and>
+        </preConditions>
+        <comment>Seed the three X3 thyroid analytes as LOINC-bearing Tests with their UOM, on the LIS-299-corrected axis-consistent codes (FT3 14928-6, FT4 II 3024-7, TSH II 3016-3) (LIS-272). Reuses an existing Test when one already carries the LOINC, exactly as 050 does; descriptions are distinct so the localized-display-name collapse the H99S hit cannot recur.</comment>
+        <sql>
+            WITH x3_tests(loinc, unit_name, test_name, report_name, local_code, sort_order) AS (
+                VALUES
+                    ('14928-6', 'pmol/L', 'Free T3', 'Free T3', 'X3-FT3-Serum',   300),
+                    ('3024-7',  'ng/dL',  'Free T4', 'Free T4', 'X3-FT4II-Serum', 301),
+                    ('3016-3',  'uIU/mL', 'TSH',     'TSH',     'X3-TSHII-Serum', 302)
+            )
+            <!-- Link the UOM and nothing else. An earlier revision also set
+                 is_active='Y' and orderable=true here, which would silently re-enable a
+                 Test a lab had deliberately retired. The seed-GUID rollback ownership
+                 boundary deliberately cannot undo changes on an adopted row, so adoption
+                 must not change its lifecycle state. -->
+            UPDATE clinlims.test t
+               SET uom_id = COALESCE((
+                        SELECT min(u.id) FROM clinlims.unit_of_measure u
+                         WHERE lower(u.name) = lower(v.unit_name)
+                            OR lower(u.description) = lower(v.unit_name)
+                            OR u.code = v.unit_name), t.uom_id),
+                   lastupdated = now()
+              FROM x3_tests v
+             WHERE t.loinc = v.loinc;
+
+            WITH x3_tests(loinc, unit_name, test_name, report_name, local_code, sort_order, seed_guid) AS (
+                VALUES
+                    ('14928-6', 'pmol/L', 'Free T3', 'Free T3', 'X3-FT3-Serum',   300,
+                     '27200000-0000-4000-8000-000000000001'),
+                    ('3024-7',  'ng/dL',  'Free T4', 'Free T4', 'X3-FT4II-Serum', 301,
+                     '27200000-0000-4000-8000-000000000002'),
+                    ('3016-3',  'uIU/mL', 'TSH',     'TSH',     'X3-TSHII-Serum', 302,
+                     '27200000-0000-4000-8000-000000000003')
+            )
+            INSERT INTO clinlims.test
+                (id, name, description, reporting_description, loinc, is_active, orderable,
+                 test_section_id, uom_id, local_code, sort_order, guid, lastupdated)
+            SELECT nextval('clinlims.test_seq'), v.test_name, v.test_name || '(Serum)',
+                   v.report_name, v.loinc, 'Y', true,
+                   (SELECT ts.id FROM clinlims.test_section ts
+                     WHERE ts.name IN ('Immunology', 'Serology', 'Biochemistry')
+                        OR ts.description = 'Chem logbook'
+                     ORDER BY CASE ts.name WHEN 'Immunology' THEN 0 WHEN 'Serology' THEN 1 ELSE 2 END, ts.id
+                     LIMIT 1),
+                   (SELECT min(u.id) FROM clinlims.unit_of_measure u
+                     WHERE lower(u.name) = lower(v.unit_name)
+                        OR lower(u.description) = lower(v.unit_name)
+                        OR u.code = v.unit_name),
+                   v.local_code, v.sort_order, v.seed_guid, now()
+              FROM x3_tests v
+             WHERE NOT EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
+
+            WITH x3_tests(loinc, sort_order) AS (
+                VALUES ('14928-6', 300), ('3024-7', 301), ('3016-3', 302)
+            )
+            INSERT INTO clinlims.sampletype_test (id, sample_type_id, test_id, is_panel, display_order)
+            SELECT nextval('clinlims.sample_type_test_seq'),
+                   (SELECT min(s.id) FROM clinlims.type_of_sample s
+                     WHERE lower(s.description) = 'serum'
+                        OR lower(s.local_abbrev) = 'serum'),
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
+                   false,
+                   v.sort_order
+              FROM x3_tests v
+             WHERE EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
+               AND EXISTS (
+                    SELECT 1 FROM clinlims.type_of_sample s
+                     WHERE lower(s.description) = 'serum'
+                        OR lower(s.local_abbrev) = 'serum')
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.sampletype_test st
+                     WHERE st.sample_type_id = (
+                            SELECT min(s.id) FROM clinlims.type_of_sample s
+                             WHERE lower(s.description) = 'serum'
+                                OR lower(s.local_abbrev) = 'serum')
+                       AND st.test_id = (
+                            SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc));
+        </sql>
+        <rollback>
+            <!-- Deterministic seed GUIDs are the ownership boundary. local_code is not:
+                 a site-owned catalog Test may already use the same local code. -->
+            <sql>
+                DELETE FROM clinlims.sampletype_test
+                 WHERE test_id IN (
+                    SELECT id FROM clinlims.test
+                     WHERE guid IN ('27200000-0000-4000-8000-000000000001',
+                                    '27200000-0000-4000-8000-000000000002',
+                                    '27200000-0000-4000-8000-000000000003'));
+
+                DELETE FROM clinlims.test
+                 WHERE guid IN ('27200000-0000-4000-8000-000000000001',
+                                '27200000-0000-4000-8000-000000000002',
+                                '27200000-0000-4000-8000-000000000003');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-003-seed-x3-numeric-test-results" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <tableExists schemaName="clinlims" tableName="test_result"/>
+        </preConditions>
+        <comment>Give each X3 test a NUMERIC test_result row at raw precision (significant_digits = -1) (LIS-272). Without a test_result row there is no numeric result definition to accept against; and because significant_digits lives on THIS table, a freshly-created Test is exactly the case 054 cannot reach — see cs7.</comment>
+        <sql>
+            INSERT INTO clinlims.test_result
+                (id, test_id, result_group, flags, tst_rslt_type, value, significant_digits,
+                 quant_limit, cont_level, lastupdated, scriptlet_id, sort_order,
+                 is_quantifiable, is_active, is_normal)
+            SELECT nextval('clinlims.test_result_seq'), t.id, null, null, 'N', null, -1,
+                   null, null, now(), null, 1, 'f', 't', 'f'
+              FROM clinlims.test t
+             WHERE t.local_code IN ('X3-FT3-Serum', 'X3-FT4II-Serum', 'X3-TSHII-Serum')
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.test_result tr WHERE tr.test_id = t.id);
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.test_result
+                 WHERE test_id IN (
+                    SELECT id FROM clinlims.test
+                     WHERE guid IN ('27200000-0000-4000-8000-000000000001',
+                                    '27200000-0000-4000-8000-000000000002',
+                                    '27200000-0000-4000-8000-000000000003'));
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-004-seed-maglumi-x3-analyzer" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer"/>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Seed the SNIBE MAGLUMI X3 analyzer in SETUP status with the profile's identity (LIS-272). Transport (ip_address/port) is intentionally left to the operator, as with the EDAN seeds — see the header. fhir_uuid is set explicitly to satisfy the NOT NULL + UNIQUE constraint 004 adds, mirroring 052/053.</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer
+                (id, name, description, is_active, status, protocol_version, communication_mode,
+                 analyzer_type, identifier_pattern, fhir_uuid, last_updated)
+            <!-- analyzer.description is VARCHAR(60) — keep this string under it. -->
+            VALUES (nextval('clinlims.analyzer_seq'), 'SNIBE MAGLUMI X3',
+                    'SNIBE MAGLUMI X3 immunoassay analyzer (ASTM E1394-97)',
+                    true, 'SETUP', 'ASTM_LIS2_A2', 'ANALYZER_INITIATED', 'IMMUNOASSAY',
+                    '(?i)(maglumi|snibe)',
+                    '27200000-0000-4000-8000-000000000004'::uuid, now());
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer
+                 WHERE fhir_uuid = '27200000-0000-4000-8000-000000000004'::uuid;
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <!-- One changeset per wire code is intentional. onFail=CONTINUE means an
+         existing site-owned map is not recorded as executed, so rollback cannot
+         delete it; maps this migration inserts are recorded and roll back exactly. -->
+    <changeSet id="lis272-005a-map-x3-ft3" author="labsolution">
+        <preConditions onFail="CONTINUE">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.test WHERE loinc = '14928-6') THEN 1 ELSE 0 END
+                </sqlCheck>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*)
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3' AND m.analyzer_test_name = 'FT3'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the bench-verified FT3 wire code to corrected LOINC 14928-6 (LIS-272/LIS-299).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, 'FT3',
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = '14928-6'), now()
+              FROM clinlims.analyzer a
+             WHERE a.name = 'SNIBE MAGLUMI X3';
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                 WHERE analyzer_test_name = 'FT3'
+                   AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-005b-map-x3-ft4-ii" author="labsolution">
+        <preConditions onFail="CONTINUE">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.test WHERE loinc = '3024-7') THEN 1 ELSE 0 END
+                </sqlCheck>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*)
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3' AND m.analyzer_test_name = 'FT4 II'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the literal bench-verified FT4 II wire code to corrected LOINC 3024-7 (LIS-272/LIS-299).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, 'FT4 II',
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = '3024-7'), now()
+              FROM clinlims.analyzer a
+             WHERE a.name = 'SNIBE MAGLUMI X3';
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                 WHERE analyzer_test_name = 'FT4 II'
+                   AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-005c-map-x3-tsh-ii" author="labsolution">
+        <preConditions onFail="CONTINUE">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.test WHERE loinc = '3016-3') THEN 1 ELSE 0 END
+                </sqlCheck>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*)
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3' AND m.analyzer_test_name = 'TSH II'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the literal bench-verified TSH II wire code to corrected LOINC 3016-3 (LIS-272/LIS-299).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, 'TSH II',
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = '3016-3'), now()
+              FROM clinlims.analyzer a
+             WHERE a.name = 'SNIBE MAGLUMI X3';
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                 WHERE analyzer_test_name = 'TSH II'
+                   AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-007-x3-raw-precision-repass" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="test_result"/>
+                <tableExists schemaName="clinlims" tableName="test_result_component"/>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+            </and>
+        </preConditions>
+        <comment>Apply the LIS-188 raw-precision policy to the X3's mapped tests (LIS-272). 054 is a ONE-SHOT UPDATE keyed on analyzer_test_map membership AT MIGRATION TIME, so mappings added after it — including cs5's — are still left rounding the instrument's decimals on accept (a two-decimal FT4 II result could persist at one decimal, or at zero decimal places when significant_digits = 0). Scoped to this analyzer rather than reusing 054's global predicate — see the SQL comment.</comment>
+        <sql>
+            <!-- Scoped to THIS analyzer's mapped tests, deliberately narrower than 054.
+                 054's predicate is every analyzer's mapped test; re-running it verbatim
+                 would also reset display precision a lab had set by hand since 054 — on
+                 tests unrelated to the X3 — and this rollback is a no-op, so that could
+                 not be undone. 054 itself pointed labs at the Test Catalog screen to set
+                 precision, so those values are real configuration, not seed defaults.
+                 Scoping to the X3 map serves this slice's purpose with no blast radius. -->
+            UPDATE clinlims.test_result
+               SET significant_digits = -1
+             WHERE tst_rslt_type = 'N'
+               AND significant_digits IS DISTINCT FROM -1
+               AND test_id IN (
+                    SELECT m.test_id
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3'
+                       AND m.test_id IS NOT NULL);
+
+            UPDATE clinlims.test_result_component
+               SET significant_digits = -1
+             WHERE result_type = 'N'
+               AND significant_digits IS DISTINCT FROM -1
+               AND test_id IN (
+                    SELECT tr.test_id
+                      FROM clinlims.test_result tr
+                      JOIN clinlims.analyzer_test_map m ON m.test_id = tr.test_id
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE tr.tst_rslt_type = 'N'
+                       AND a.name = 'SNIBE MAGLUMI X3'
+                       AND m.test_id IS NOT NULL);
+        </sql>
+        <rollback>
+            <!-- No-op by design, for the reason 054 gives: the prior significant_digits
+                 were demo-seed defaults, not lab configuration, and restoring them would
+                 re-introduce the data-loss defect. Widening to raw is never lossy. -->
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
