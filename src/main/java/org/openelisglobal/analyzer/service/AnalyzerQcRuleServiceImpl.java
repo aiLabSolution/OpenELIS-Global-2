@@ -76,7 +76,8 @@ public class AnalyzerQcRuleServiceImpl extends BaseObjectServiceImpl<AnalyzerQcR
 
     @Override
     @Transactional
-    public AnalyzerQcRule updateRule(String analyzerId, String ruleId, AnalyzerQcRule updates, String sysUserId) {
+    public AnalyzerQcRule updateRule(String analyzerId, String ruleId, AnalyzerQcRule updates, Boolean isActive,
+            String sysUserId) {
         AnalyzerQcRule existing;
         try {
             existing = get(ruleId);
@@ -96,7 +97,9 @@ public class AnalyzerQcRuleServiceImpl extends BaseObjectServiceImpl<AnalyzerQcR
         if (updates.getOperand() != null) {
             existing.setOperand(updates.getOperand());
         }
-        existing.setActive(updates.isActive());
+        if (isActive != null) {
+            existing.setActive(isActive);
+        }
         if (updates.getDisplayOrder() > 0) {
             existing.setDisplayOrder(updates.getDisplayOrder());
         }

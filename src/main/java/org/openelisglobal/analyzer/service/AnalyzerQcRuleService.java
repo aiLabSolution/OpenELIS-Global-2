@@ -14,7 +14,14 @@ public interface AnalyzerQcRuleService extends BaseObjectService<AnalyzerQcRule,
 
     AnalyzerQcRule createRule(String analyzerId, AnalyzerQcRule rule, String sysUserId);
 
-    AnalyzerQcRule updateRule(String analyzerId, String ruleId, AnalyzerQcRule updates, String sysUserId);
+    /**
+     * Partial update. {@code isActive} is threaded separately from {@code updates}
+     * because the entity's primitive {@code active} defaults to true and cannot
+     * express "absent": null means leave the stored flag unchanged (LIS-297 —
+     * activation/deactivation must be an explicit act).
+     */
+    AnalyzerQcRule updateRule(String analyzerId, String ruleId, AnalyzerQcRule updates, Boolean isActive,
+            String sysUserId);
 
     void deleteRule(String analyzerId, String ruleId);
 
