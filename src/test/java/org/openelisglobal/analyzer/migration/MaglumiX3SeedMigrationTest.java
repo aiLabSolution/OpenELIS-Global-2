@@ -329,7 +329,13 @@ public class MaglumiX3SeedMigrationTest {
     }
 
     private int count(String sql) throws SQLException {
-        return Integer.parseInt(scalar(sql));
+        String value = scalar(sql);
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new SQLException(
+                    "Expected integer result for SQL [" + sql + "], but got [" + value + "]", e);
+        }
     }
 
     private String scalar(String sql) throws SQLException {
