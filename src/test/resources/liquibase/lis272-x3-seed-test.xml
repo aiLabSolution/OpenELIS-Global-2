@@ -172,6 +172,12 @@
             must, or the X3's decimals are rounded away on accept.
         </comment>
         <sql>
+            <!-- A site-owned UOM that cs1 adopts and widens. Its description is deliberately
+                not the seed marker, so rollback must preserve it. -->
+            INSERT INTO clinlims.unit_of_measure
+            (id, name, description, code, is_active, lastupdated)
+            VALUES (900, 'pmol/L', 'Site catalog pmol/L', NULL, 'Y', now());
+
             INSERT INTO clinlims.test_section (id, name, description)
             VALUES (1, 'Immunology', 'Immunology logbook');
 
@@ -179,13 +185,15 @@
             VALUES (1, 'Serum', 'Serum');
 
             INSERT INTO clinlims.test
-            (id, name, description, loinc, is_active, orderable, local_code,
+            (id, name, description, loinc, is_active, orderable, local_code, guid,
             lastupdated)
             <!-- Deliberately RETIRED (is_active='N', orderable=false): stands for
                 a Test a lab took out of service. Adopting it must not quietly put it back
-                into service — see retiredCatalogTestIsNotSilentlyReactivated(). -->
+                into service. Its local_code also deliberately matches the seed's target,
+                proving that only the seed GUID — never local_code — establishes rollback
+                ownership. See retiredCatalogTestIsNotSilentlyReactivated(). -->
             VALUES (900, 'TSH', 'TSH(Serum)', '3016-3', 'N', false,
-            'CATALOG-TSH-Serum',
+            'X3-TSHII-Serum', '11100000-0000-4000-8000-000000000900',
             now());
 
             INSERT INTO clinlims.test_result

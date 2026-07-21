@@ -122,7 +122,8 @@
                     ('uIU/mL',  'uIU/mL',  'u[IU]/mL')
             )
             INSERT INTO clinlims.unit_of_measure (id, name, description, lastupdated, code, ucum_code, is_active)
-            SELECT nextval('clinlims.unit_of_measure_seq'), v.unit_name, v.unit_name, now(),
+            SELECT nextval('clinlims.unit_of_measure_seq'), v.unit_name,
+                   'LIS-272 X3 seed: ' || v.unit_name, now(),
                    v.unit_code, v.ucum_code, 'Y'
               FROM x3_units v
              WHERE NOT EXISTS (
@@ -132,16 +133,15 @@
                         OR u.code = v.unit_code);
         </sql>
         <rollback>
-            <!-- Delete only rows this changeset can have created: name, code and ucum_code
-                 all matching the seeded triple. A pre-existing UOM that merely had its
-                 ucum_code filled in by the UPDATE above is left alone — widening a row to
-                 carry UCUM is not lossy, and reverting it would re-open the gap. -->
+            <!-- The seed-only description distinguishes inserted rows from pre-existing
+                 UOMs that the UPDATE above widened with code/UCUM metadata. Widening is
+                 non-lossy and deliberately survives rollback. -->
             <sql>
                 DELETE FROM clinlims.unit_of_measure
-                 WHERE (name, code, ucum_code) IN (
-                        ('pmol/L', 'pmol/L', 'pmol/L'),
-                        ('ng/dL',  'ng/dL',  'ng/dL'),
-                        ('uIU/mL', 'uIU/mL', 'u[IU]/mL'));
+                 WHERE (name, description, code, ucum_code) IN (
+                        ('pmol/L', 'LIS-272 X3 seed: pmol/L', 'pmol/L', 'pmol/L'),
+                        ('ng/dL',  'LIS-272 X3 seed: ng/dL',  'ng/dL',  'ng/dL'),
+                        ('uIU/mL', 'LIS-272 X3 seed: uIU/mL', 'uIU/mL', 'u[IU]/mL'));
             </sql>
         </rollback>
     </changeSet>
@@ -165,9 +165,9 @@
             )
             <!-- Link the UOM and nothing else. An earlier revision also set
                  is_active='Y' and orderable=true here, which would silently re-enable a
-                 Test a lab had deliberately retired — and the rollback below is scoped to
-                 the X3-* local_code this seed assigns, so it could not undo that on an
-                 adopted row. Adopting a catalog Test must not change its lifecycle state. -->
+                 Test a lab had deliberately retired. The seed-GUID rollback ownership
+                 boundary deliberately cannot undo changes on an adopted row, so adoption
+                 must not change its lifecycle state. -->
             UPDATE clinlims.test t
                SET uom_id = COALESCE((
                         SELECT min(u.id) FROM clinlims.unit_of_measure u
@@ -178,11 +178,14 @@
               FROM x3_tests v
              WHERE t.loinc = v.loinc;
 
-            WITH x3_tests(loinc, unit_name, test_name, report_name, local_code, sort_order) AS (
+            WITH x3_tests(loinc, unit_name, test_name, report_name, local_code, sort_order, seed_guid) AS (
                 VALUES
-                    ('14928-6', 'pmol/L', 'Free T3', 'Free T3', 'X3-FT3-Serum',   300),
-                    ('3024-7',  'ng/dL',  'Free T4', 'Free T4', 'X3-FT4II-Serum', 301),
-                    ('3016-3',  'uIU/mL', 'TSH',     'TSH',     'X3-TSHII-Serum', 302)
+                    ('14928-6', 'pmol/L', 'Free T3', 'Free T3', 'X3-FT3-Serum',   300,
+                     '27200000-0000-4000-8000-000000000001'),
+                    ('3024-7',  'ng/dL',  'Free T4', 'Free T4', 'X3-FT4II-Serum', 301,
+                     '27200000-0000-4000-8000-000000000002'),
+                    ('3016-3',  'uIU/mL', 'TSH',     'TSH',     'X3-TSHII-Serum', 302,
+                     '27200000-0000-4000-8000-000000000003')
             )
             INSERT INTO clinlims.test
                 (id, name, description, reporting_description, loinc, is_active, orderable,
@@ -198,7 +201,7 @@
                      WHERE lower(u.name) = lower(v.unit_name)
                         OR lower(u.description) = lower(v.unit_name)
                         OR u.code = v.unit_name),
-                   v.local_code, v.sort_order, gen_random_uuid()::varchar, now()
+                   v.local_code, v.sort_order, v.seed_guid, now()
               FROM x3_tests v
              WHERE NOT EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc);
 
@@ -229,17 +232,20 @@
                             SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc));
         </sql>
         <rollback>
-            <!-- Scoped by the X3-* local_code this seed assigns, so a Test that already
-                 carried one of these LOINCs (and was only linked to a UOM by the UPDATE
-                 above) is never deleted. -->
+            <!-- Deterministic seed GUIDs are the ownership boundary. local_code is not:
+                 a site-owned catalog Test may already use the same local code. -->
             <sql>
                 DELETE FROM clinlims.sampletype_test
                  WHERE test_id IN (
-                    SELECT id FROM clinlims.test WHERE local_code LIKE 'X3-%-Serum');
+                    SELECT id FROM clinlims.test
+                     WHERE guid IN ('27200000-0000-4000-8000-000000000001',
+                                    '27200000-0000-4000-8000-000000000002',
+                                    '27200000-0000-4000-8000-000000000003'));
 
                 DELETE FROM clinlims.test
-                 WHERE local_code LIKE 'X3-%-Serum'
-                   AND loinc IN ('14928-6', '3024-7', '3016-3');
+                 WHERE guid IN ('27200000-0000-4000-8000-000000000001',
+                                '27200000-0000-4000-8000-000000000002',
+                                '27200000-0000-4000-8000-000000000003');
             </sql>
         </rollback>
     </changeSet>
@@ -265,7 +271,10 @@
             <sql>
                 DELETE FROM clinlims.test_result
                  WHERE test_id IN (
-                    SELECT id FROM clinlims.test WHERE local_code LIKE 'X3-%-Serum');
+                    SELECT id FROM clinlims.test
+                     WHERE guid IN ('27200000-0000-4000-8000-000000000001',
+                                    '27200000-0000-4000-8000-000000000002',
+                                    '27200000-0000-4000-8000-000000000003'));
             </sql>
         </rollback>
     </changeSet>
@@ -288,47 +297,123 @@
             VALUES (nextval('clinlims.analyzer_seq'), 'SNIBE MAGLUMI X3',
                     'SNIBE MAGLUMI X3 immunoassay analyzer (ASTM E1394-97)',
                     true, 'SETUP', 'ASTM_LIS2_A2', 'ANALYZER_INITIATED', 'IMMUNOASSAY',
-                    '(?i)(maglumi|snibe)', gen_random_uuid(), now());
+                    '(?i)(maglumi|snibe)',
+                    '27200000-0000-4000-8000-000000000004'::uuid, now());
         </sql>
         <rollback>
-            <sql>DELETE FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3';</sql>
+            <sql>
+                DELETE FROM clinlims.analyzer
+                 WHERE fhir_uuid = '27200000-0000-4000-8000-000000000004'::uuid;
+            </sql>
         </rollback>
     </changeSet>
 
-    <changeSet id="lis272-005-map-x3-wire-codes" author="labsolution">
-        <preConditions onFail="MARK_RAN">
+    <!-- One changeset per wire code is intentional. onFail=CONTINUE means an
+         existing site-owned map is not recorded as executed, so rollback cannot
+         delete it; maps this migration inserts are recorded and roll back exactly. -->
+    <changeSet id="lis272-005a-map-x3-ft3" author="labsolution">
+        <preConditions onFail="CONTINUE">
             <and>
                 <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
                 <sqlCheck expectedResult="1">
                     SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
                 </sqlCheck>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.test WHERE loinc = '14928-6') THEN 1 ELSE 0 END
+                </sqlCheck>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*)
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3' AND m.analyzer_test_name = 'FT3'
+                </sqlCheck>
             </and>
         </preConditions>
-        <comment>Map the three bench-verified X3 wire codes to the Tests carrying their corrected LOINCs (LIS-272/LIS-299). The " II" suffixes are literal: the bridge's code lookup is exact-match, so 'FT4' would not resolve 'FT4 II'. Codes whose LOINC-bearing Test is absent are skipped rather than mapped to a NULL test_id, as in 052/053.</comment>
+        <comment>Map the bench-verified FT3 wire code to corrected LOINC 14928-6 (LIS-272/LIS-299).</comment>
         <sql>
             INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
-            SELECT a.id, v.code,
-                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = v.loinc),
-                   now()
+            SELECT a.id, 'FT3',
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = '14928-6'), now()
               FROM clinlims.analyzer a
-              CROSS JOIN (VALUES
-                    ('FT3',    '14928-6'),
-                    ('FT4 II', '3024-7'),
-                    ('TSH II', '3016-3')
-                 ) AS v(code, loinc)
-             WHERE a.name = 'SNIBE MAGLUMI X3'
-               AND EXISTS (SELECT 1 FROM clinlims.test t WHERE t.loinc = v.loinc)
-               AND NOT EXISTS (
-                    SELECT 1 FROM clinlims.analyzer_test_map m
-                     WHERE m.analyzer_id = a.id AND m.analyzer_test_name = v.code);
+             WHERE a.name = 'SNIBE MAGLUMI X3';
         </sql>
         <rollback>
-            <!-- cs4's rollback deletes the analyzer and analyzer_test_map_analyzer_fk is
-                 ON DELETE CASCADE, so these rows go with it. Scoped anyway, so rolling
-                 back cs5 alone is still correct. -->
             <sql>
                 DELETE FROM clinlims.analyzer_test_map
-                 WHERE analyzer_test_name IN ('FT3', 'FT4 II', 'TSH II')
+                 WHERE analyzer_test_name = 'FT3'
+                   AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-005b-map-x3-ft4-ii" author="labsolution">
+        <preConditions onFail="CONTINUE">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.test WHERE loinc = '3024-7') THEN 1 ELSE 0 END
+                </sqlCheck>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*)
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3' AND m.analyzer_test_name = 'FT4 II'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the literal bench-verified FT4 II wire code to corrected LOINC 3024-7 (LIS-272/LIS-299).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, 'FT4 II',
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = '3024-7'), now()
+              FROM clinlims.analyzer a
+             WHERE a.name = 'SNIBE MAGLUMI X3';
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                 WHERE analyzer_test_name = 'FT4 II'
+                   AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="lis272-005c-map-x3-tsh-ii" author="labsolution">
+        <preConditions onFail="CONTINUE">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+                <sqlCheck expectedResult="1">
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM clinlims.test WHERE loinc = '3016-3') THEN 1 ELSE 0 END
+                </sqlCheck>
+                <sqlCheck expectedResult="0">
+                    SELECT count(*)
+                      FROM clinlims.analyzer_test_map m
+                      JOIN clinlims.analyzer a ON a.id = m.analyzer_id
+                     WHERE a.name = 'SNIBE MAGLUMI X3' AND m.analyzer_test_name = 'TSH II'
+                </sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Map the literal bench-verified TSH II wire code to corrected LOINC 3016-3 (LIS-272/LIS-299).</comment>
+        <sql>
+            INSERT INTO clinlims.analyzer_test_map (analyzer_id, analyzer_test_name, test_id, last_updated)
+            SELECT a.id, 'TSH II',
+                   (SELECT min(t.id) FROM clinlims.test t WHERE t.loinc = '3016-3'), now()
+              FROM clinlims.analyzer a
+             WHERE a.name = 'SNIBE MAGLUMI X3';
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_test_map
+                 WHERE analyzer_test_name = 'TSH II'
                    AND analyzer_id IN (SELECT id FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3');
             </sql>
         </rollback>

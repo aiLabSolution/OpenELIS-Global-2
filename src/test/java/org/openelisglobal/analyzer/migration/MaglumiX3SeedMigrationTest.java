@@ -220,8 +220,8 @@ public class MaglumiX3SeedMigrationTest {
      * LIS-188's changeset 054 is a one-shot UPDATE keyed on analyzer_test_map
      * membership at migration time, so it cannot reach a mapping added afterwards.
      * The fixture leaves a pre-existing catalog TSH test at significant_digits = 2
-     * — exactly that case — and 063 cs7 must widen it to raw, or "FT4 II" 1.58
-     * ng/dL persists as 1.58 rounded on accept.
+     * — exactly that case — and 063 cs7 must widen it to raw or a multi-decimal
+     * analyzer result can be rounded on accept.
      */
     @Test
     public void reappliesRawPrecisionToTestsMappedAfterChangeset054() throws Exception {
@@ -288,20 +288,20 @@ public class MaglumiX3SeedMigrationTest {
      * row is deliberately retired (is_active='N', orderable=false), standing for a
      * Test a lab took out of service; an earlier revision of cs2 also set
      * is_active='Y' and orderable=true on every row carrying a seeded LOINC, which
-     * would have quietly put it back into service on upgrade — and the rollback,
-     * scoped to the X3-* local_code this seed assigns, could not have undone that
-     * on an adopted row.
+     * would have quietly put it back into service on upgrade. The seed-GUID
+     * rollback ownership boundary deliberately cannot undo lifecycle changes on an
+     * adopted row.
      */
     @Test
     public void retiredCatalogTestIsNotSilentlyReactivated() throws Exception {
         assertEquals("adopting a Test must not re-activate it", "N",
-                scalar("SELECT is_active FROM clinlims.test WHERE local_code = 'CATALOG-TSH-Serum'"));
+                scalar("SELECT is_active FROM clinlims.test WHERE id = 900"));
         assertEquals("adopting a Test must not make it orderable again", "f",
-                scalar("SELECT orderable FROM clinlims.test WHERE local_code = 'CATALOG-TSH-Serum'"));
+                scalar("SELECT orderable FROM clinlims.test WHERE id = 900"));
         // The adoption itself must still have happened: the UOM is the one field cs2
         // owns.
         assertEquals("uIU/mL", scalar("SELECT u.name FROM clinlims.test t"
-                + " JOIN clinlims.unit_of_measure u ON u.id = t.uom_id" + " WHERE t.local_code = 'CATALOG-TSH-Serum'"));
+                + " JOIN clinlims.unit_of_measure u ON u.id = t.uom_id WHERE t.id = 900"));
     }
 
     /**
