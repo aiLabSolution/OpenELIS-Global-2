@@ -22,11 +22,13 @@
     <!--    three wire codes onto three ARBITRARY LOINC-bearing catalog tests.  -->
     <!--    That proved the plumbing, never the clinical coding.                -->
     <!--                                                                    -->
-    <!-- WIRE TRUTH (bench-verified, LIS-75 captures under                     -->
-    <!-- evidence/bench/maglumi-x3/, re-confirmed by LIS-38):                   -->
-    <!--   FT3     = 5.43 pmol/L                                               -->
-    <!--   FT4 II  = 1.58 ng/dL      <- note the literal " II" suffix          -->
-    <!--   TSH II  = 2.78 uIU/mL     <- likewise                               -->
+    <!-- WIRE TRUTH (bench-verified by LIS-75 capture session                  -->
+    <!-- 20260717-0101010034012301113, raw capture SHA-256                      -->
+    <!-- 2c50acec48e69f8e24f1abadde11820e284c656a856e74e9a4fca01679900076;    -->
+    <!-- re-confirmed by LIS-38):                                               -->
+    <!--   FT3     / pmol/L                                                     -->
+    <!--   FT4 II  / ng/dL      <- note the literal " II" suffix               -->
+    <!--   TSH II  / uIU/mL     <- likewise                                    -->
     <!-- The suffixes are part of the code the analyzer puts on the wire, and   -->
     <!-- the bridge's code->LOINC lookup is EXACT-MATCH, so 'FT4' and 'FT4 II'  -->
     <!-- are different keys. Seeding the un-suffixed forms would resolve none   -->
@@ -340,7 +342,7 @@
                 <tableExists schemaName="clinlims" tableName="analyzer_test_map"/>
             </and>
         </preConditions>
-        <comment>Apply the LIS-188 raw-precision policy to the X3's mapped tests (LIS-272). 054 is a ONE-SHOT UPDATE keyed on analyzer_test_map membership AT MIGRATION TIME, so mappings added after it — including cs5's — are still left rounding the instrument's decimals on accept (FT4 II 1.58 ng/dL would persist as 1.6, or 2 at significant_digits = 0). Scoped to this analyzer rather than reusing 054's global predicate — see the SQL comment.</comment>
+        <comment>Apply the LIS-188 raw-precision policy to the X3's mapped tests (LIS-272). 054 is a ONE-SHOT UPDATE keyed on analyzer_test_map membership AT MIGRATION TIME, so mappings added after it — including cs5's — are still left rounding the instrument's decimals on accept (a two-decimal FT4 II result could persist at one decimal, or at zero decimal places when significant_digits = 0). Scoped to this analyzer rather than reusing 054's global predicate — see the SQL comment.</comment>
         <sql>
             <!-- Scoped to THIS analyzer's mapped tests, deliberately narrower than 054.
                  054's predicate is every analyzer's mapped test; re-running it verbatim

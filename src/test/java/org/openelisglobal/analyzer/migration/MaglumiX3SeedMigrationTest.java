@@ -333,8 +333,7 @@ public class MaglumiX3SeedMigrationTest {
         try {
             return Integer.parseInt(value);
         } catch (NumberFormatException e) {
-            throw new SQLException(
-                    "Expected integer result for SQL [" + sql + "], but got [" + value + "]", e);
+            throw new SQLException("Expected integer result for SQL [" + sql + "], but got [" + value + "]", e);
         }
     }
 
