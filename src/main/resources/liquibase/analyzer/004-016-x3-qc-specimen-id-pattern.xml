@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- ================================================================== -->
+    <!-- LIS-269 — replace the inert O.12 QC discriminator with the          -->
+    <!-- wire-verified specimen-id pattern.                                  -->
+    <!--                                                                    -->
+    <!-- 004-015 seeded FIELD_EQUALS(O.12, 'Q') for the MAGLUMI X3. The      -->
+    <!-- 2026-07-24 client-lab bench capture proves that rule can never      -->
+    <!-- fire: the X3's ASTM O-record carries only FIVE fields on both QC    -->
+    <!-- and patient traffic, e.g.                                          -->
+    <!--                                                                    -->
+    <!--   QC      : O|1|#24725021Q1#||^^^Anti-Tg II                        -->
+    <!--   Patient : O|1|0000235283||^^^hs-cTnI                             -->
+    <!--                                                                    -->
+    <!-- so O.12 is always absent, no rule matches, and every QC row is      -->
+    <!-- classified PATIENT — control material into the patient stream.      -->
+    <!-- The residual was documented in 004-015 and in the profile JSON,     -->
+    <!-- with the operator QC-review SOP as the accepted compensating        -->
+    <!-- control; what was missing was the real discriminator.               -->
+    <!--                                                                    -->
+    <!-- The X3 wraps the QC lot and level in '#' in the specimen id (O-3),  -->
+    <!-- e.g. '#24725021Q1#'. Evidenced across 5 lots and 5 assays; no       -->
+    <!-- patient sample id in any bench capture contains a '#' at all.       -->
+    <!-- Evidence: evidence/bench/maglumi-x3/20260724-01010110034012301378/  -->
+    <!--                                                                    -->
+    <!-- WHY A NEW FILE RATHER THAN AN EDIT TO 004-015:                      -->
+    <!-- 004-015's INSERT is guarded by NOT EXISTS on (analyzer_id,          -->
+    <!-- rule_type). Editing its values in place would not re-run on any     -->
+    <!-- database that already migrated — liquibase records the changeSet    -->
+    <!-- as executed and (with a changed checksum) would fail validation     -->
+    <!-- rather than re-seed. A new changeSet is the only form that reaches  -->
+    <!-- existing deployments.                                              -->
+    <!--                                                                    -->
+    <!-- Values mirror projects/analyzer-profiles/astm/snibe-maglumi-x3.json -->
+    <!-- verbatim, so a seeded row and a profile-created row provision       -->
+    <!-- identically. Keep description under the VARCHAR(255) column width:  -->
+    <!-- a longer string truncates and can silently skip provisioning        -->
+    <!-- (LIS-292).                                                          -->
+    <!-- ================================================================== -->
+
+    <changeSet id="lis269-001-x3-qc-specimen-id-pattern" author="labsolution">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists schemaName="clinlims" tableName="analyzer_qc_rule"/>
+                <sqlCheck expectedResult="1">
+                    SELECT count(*) FROM clinlims.analyzer WHERE name = 'SNIBE MAGLUMI X3'
+                </sqlCheck>
+            </and>
+        </preConditions>
+
+        <comment>
+            LIS-269: seed the wire-verified SPECIMEN_ID_PATTERN QC rule for the MAGLUMI X3
+            and deactivate the inert FIELD_EQUALS O.12 rule it replaces.
+        </comment>
+
+        <!-- 1. Insert the wire-verified rule. Ownership and idempotency are keyed by
+             this changeSet's deterministic id, not by rule_type: a site may already
+             carry its own SPECIMEN_ID_PATTERN, and that must neither suppress the
+             required safe rule nor be overwritten. -->
+        <sql>
+            INSERT INTO clinlims.analyzer_qc_rule
+                   (id, analyzer_id, rule_type, target_field, operand,
+                    is_active, display_order, description, last_updated)
+            SELECT v.seed_id, a.id, v.rule_type, v.target_field, v.operand,
+                   v.is_active, v.display_order, v.description, now()
+              FROM clinlims.analyzer a
+              CROSS JOIN (VALUES
+                    <!-- analyzer_qc_rule.description is VARCHAR(255); keep under it.
+                         The unabridged rationale lives in the profile JSON. -->
+                    ('27200000-0000-4000-8000-000000000010',
+                     'SPECIMEN_ID_PATTERN', NULL, '^#.+#$', true, 1,
+                     'WIRE-VERIFIED (LIS-269, 2026-07-24): X3 wraps QC lot+level in ''#'' in O-3, e.g. ''#24725021Q1#''; seen on 5 lots/5 assays, no patient id contains ''#''. Replaces inert FIELD_EQUALS O.12=Q: the X3 O-record has only 5 fields, so O.12 never existed.')
+                 ) AS v(seed_id, rule_type, target_field, operand, is_active, display_order, description)
+             WHERE a.name = 'SNIBE MAGLUMI X3'
+               AND NOT EXISTS (
+                    SELECT 1 FROM clinlims.analyzer_qc_rule r
+                     WHERE r.id = v.seed_id);
+        </sql>
+
+        <!-- 2. Deactivate the rule it replaces. Deactivated rather than deleted so the
+             row stays visible to an admin and the change is auditable. Only ACTIVE
+             rules are pushed to the bridge (getActiveRuleDtosForAnalyzer), so an
+             inactive row cannot fire on live traffic. -->
+        <sql>
+            UPDATE clinlims.analyzer_qc_rule r
+               SET is_active = false,
+                   description = 'SUPERSEDED by LIS-269 SPECIMEN_ID_PATTERN. Never fired: the X3 O-record has only 5 fields, so O.12 was always absent and QC classified as PATIENT. Deactivated, not deleted, so the change stays auditable.',
+                   last_updated = now()
+              FROM clinlims.analyzer a
+             WHERE r.analyzer_id = a.id
+               AND a.name = 'SNIBE MAGLUMI X3'
+               AND r.id = '27200000-0000-4000-8000-000000000008'
+               AND r.rule_type = 'FIELD_EQUALS'
+               AND r.target_field = 'O.12'
+               AND r.operand = 'Q'
+               AND r.is_active = true
+               AND r.description = 'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.';
+        </sql>
+
+        <rollback>
+            <!-- Restore the prior state: drop the new rule, reactivate the old one.
+                 Scoped to the X3 analyzer and to the exact seed id this changeSet
+                 inserted, so it can never delete a rule it did not create. -->
+            <sql>
+                DELETE FROM clinlims.analyzer_qc_rule
+                 WHERE id = '27200000-0000-4000-8000-000000000010';
+            </sql>
+            <sql>
+                UPDATE clinlims.analyzer_qc_rule r
+                   SET is_active = true,
+                       description = 'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.',
+                       last_updated = now()
+                  FROM clinlims.analyzer a
+                 WHERE r.analyzer_id = a.id
+                   AND a.name = 'SNIBE MAGLUMI X3'
+                   AND r.id = '27200000-0000-4000-8000-000000000008'
+                   AND r.rule_type = 'FIELD_EQUALS'
+                   AND r.target_field = 'O.12'
+                   AND r.operand = 'Q'
+                   AND r.is_active = false
+                   AND r.description = 'SUPERSEDED by LIS-269 SPECIMEN_ID_PATTERN. Never fired: the X3 O-record has only 5 fields, so O.12 was always absent and QC classified as PATIENT. Deactivated, not deleted, so the change stays auditable.';
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

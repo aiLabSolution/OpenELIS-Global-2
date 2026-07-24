@@ -12,5 +12,9 @@
   <!-- LIS-272: QC rules for the MAGLUMI X3 row seeded by 3.5.x.x/063. Must run after
        004-012 creates analyzer_qc_rule, which is why it is not in 063 itself. -->
   <include relativeToChangelogFile="true" file="004-015-seed-maglumi-x3-qc-rules.xml"/>
+  <!-- LIS-269: replace 004-015's FIELD_EQUALS(O.12,'Q') with the wire-verified
+       SPECIMEN_ID_PATTERN. A new changeSet rather than an edit to 004-015, which is
+       NOT-EXISTS-guarded and would not re-run on an already-migrated database. -->
+  <include relativeToChangelogFile="true" file="004-016-x3-qc-specimen-id-pattern.xml"/>
 
 </databaseChangeLog>

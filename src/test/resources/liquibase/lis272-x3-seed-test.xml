@@ -298,5 +298,39 @@
 
     <include
         file="liquibase/analyzer/004-015-seed-maglumi-x3-qc-rules.xml" />
+    <!-- Model an upgraded site that already has administrator-authored rules.
+        004-016 must add its owned safe rule without suppressing or rewriting these. -->
+    <changeSet id="lis269-test-site-owned-qc-rules"
+        author="labsolution">
+        <sql>
+            INSERT INTO clinlims.analyzer_qc_rule
+            (id, analyzer_id, rule_type, target_field, operand, is_active,
+            display_order, description, last_updated)
+            SELECT '11100000-0000-4000-8000-000000000011', a.id,
+            'SPECIMEN_ID_PATTERN', NULL, '^SITE-CONTROL$', false, 80,
+            'Site-owned inactive pattern', now()
+            FROM clinlims.analyzer a
+            WHERE a.name = 'SNIBE MAGLUMI X3';
+
+            INSERT INTO clinlims.analyzer_qc_rule
+            (id, analyzer_id, rule_type, target_field, operand, is_active,
+            display_order, description, last_updated)
+            SELECT '11100000-0000-4000-8000-000000000012', a.id,
+            'FIELD_EQUALS', 'O.12', 'Q', false, 81,
+            'Site-owned inactive O.12 rule', now()
+            FROM clinlims.analyzer a
+            WHERE a.name = 'SNIBE MAGLUMI X3';
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM clinlims.analyzer_qc_rule
+                WHERE id IN ('11100000-0000-4000-8000-000000000011',
+                '11100000-0000-4000-8000-000000000012');
+            </sql>
+        </rollback>
+    </changeSet>
+    <!-- LIS-269: must run after 004-015, which seeds the rule it supersedes. -->
+    <include
+        file="liquibase/analyzer/004-016-x3-qc-specimen-id-pattern.xml" />
 
 </databaseChangeLog>

@@ -17,8 +17,8 @@ import org.junit.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
- * Exercises the rollback blocks of the LIS-272 X3 seed (063 +
- * analyzer/004-015).
+ * Exercises the rollback blocks of the LIS-272 X3 seed (063 + analyzer/004-015)
+ * and the LIS-269 discriminator replacement (004-016).
  *
  * <p>
  * A rollback that throws is not the only failure worth guarding. The one that
@@ -52,7 +52,8 @@ public class MaglumiX3SeedRollbackTest {
                 liquibase.update(new Contexts());
                 assertEquals(1,
                         count(connection, "SELECT count(*) FROM clinlims.analyzer WHERE name = '" + ANALYZER + "'"));
-                assertEquals(2, count(connection, "SELECT count(*) FROM clinlims.analyzer_qc_rule"));
+                assertEquals("004-016 adds its rule beside two seed-owned and two site-owned regression rows", 5,
+                        count(connection, "SELECT count(*) FROM clinlims.analyzer_qc_rule"));
 
                 liquibase.rollback(BASELINE_TAG, "");
 
@@ -122,6 +123,28 @@ public class MaglumiX3SeedRollbackTest {
                                 + " AND fhir_uuid = '11100000-0000-4000-8000-000000000700'"));
                 assertEquals("missing maps are still filled on an adopted analyzer", 3,
                         count(connection, "SELECT count(*) FROM clinlims.analyzer_test_map WHERE analyzer_id = 700"));
+
+                liquibase.rollback(1, "");
+                assertEquals("004-016 rollback removes only its deterministic seed row", 0,
+                        count(connection, "SELECT count(*) FROM clinlims.analyzer_qc_rule"
+                                + " WHERE id = '27200000-0000-4000-8000-000000000010'"));
+                assertEquals("004-016 rollback restores the exact 004-015 seed row", 1,
+                        count(connection,
+                                "SELECT count(*) FROM clinlims.analyzer_qc_rule"
+                                        + " WHERE id = '27200000-0000-4000-8000-000000000008'" + " AND is_active = true"
+                                        + " AND description LIKE 'PROVISIONAL (LIS-266):%'"));
+                assertEquals("rollback preserves a site-owned pattern byte-for-byte", 1,
+                        count(connection,
+                                "SELECT count(*) FROM clinlims.analyzer_qc_rule"
+                                        + " WHERE id = '11100000-0000-4000-8000-000000000011'"
+                                        + " AND operand = '^SITE-CONTROL$' AND is_active = false"
+                                        + " AND description = 'Site-owned inactive pattern'"));
+                assertEquals("rollback preserves a site-owned O.12 row byte-for-byte", 1,
+                        count(connection,
+                                "SELECT count(*) FROM clinlims.analyzer_qc_rule"
+                                        + " WHERE id = '11100000-0000-4000-8000-000000000012'"
+                                        + " AND is_active = false AND description = 'Site-owned inactive O.12 rule'"));
+                liquibase.update(new Contexts());
 
                 liquibase.rollback(BASELINE_TAG, "");
 
