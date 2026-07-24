@@ -63,7 +63,7 @@
         <sql>
             INSERT INTO clinlims.analyzer_qc_rule
                    (id, analyzer_id, rule_type, target_field, operand,
-                    is_active, display_order, description, lastupdated)
+                    is_active, display_order, description, last_updated)
             SELECT v.seed_id, a.id, v.rule_type, v.target_field, v.operand,
                    v.is_active, v.display_order, v.description, now()
               FROM clinlims.analyzer a
@@ -88,7 +88,7 @@
             UPDATE clinlims.analyzer_qc_rule r
                SET is_active = false,
                    description = 'SUPERSEDED by LIS-269 SPECIMEN_ID_PATTERN. Never fired: the X3 O-record has only 5 fields, so O.12 was always absent and QC classified as PATIENT. Deactivated, not deleted, so the change stays auditable.',
-                   lastupdated = now()
+                   last_updated = now()
               FROM clinlims.analyzer a
              WHERE r.analyzer_id = a.id
                AND a.name = 'SNIBE MAGLUMI X3'
@@ -108,7 +108,7 @@
                 UPDATE clinlims.analyzer_qc_rule r
                    SET is_active = true,
                        description = 'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.',
-                       lastupdated = now()
+                       last_updated = now()
                   FROM clinlims.analyzer a
                  WHERE r.analyzer_id = a.id
                    AND a.name = 'SNIBE MAGLUMI X3'
