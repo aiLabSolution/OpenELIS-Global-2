@@ -58,8 +58,10 @@
             and deactivate the inert FIELD_EQUALS O.12 rule it replaces.
         </comment>
 
-        <!-- 1. Insert the wire-verified rule. Idempotent on (analyzer_id, rule_type),
-             matching the guard style 004-015 uses. -->
+        <!-- 1. Insert the wire-verified rule. Ownership and idempotency are keyed by
+             this changeSet's deterministic id, not by rule_type: a site may already
+             carry its own SPECIMEN_ID_PATTERN, and that must neither suppress the
+             required safe rule nor be overwritten. -->
         <sql>
             INSERT INTO clinlims.analyzer_qc_rule
                    (id, analyzer_id, rule_type, target_field, operand,
@@ -77,7 +79,7 @@
              WHERE a.name = 'SNIBE MAGLUMI X3'
                AND NOT EXISTS (
                     SELECT 1 FROM clinlims.analyzer_qc_rule r
-                     WHERE r.analyzer_id = a.id AND r.rule_type = v.rule_type);
+                     WHERE r.id = v.seed_id);
         </sql>
 
         <!-- 2. Deactivate the rule it replaces. Deactivated rather than deleted so the
@@ -92,8 +94,12 @@
               FROM clinlims.analyzer a
              WHERE r.analyzer_id = a.id
                AND a.name = 'SNIBE MAGLUMI X3'
+               AND r.id = '27200000-0000-4000-8000-000000000008'
                AND r.rule_type = 'FIELD_EQUALS'
-               AND r.target_field = 'O.12';
+               AND r.target_field = 'O.12'
+               AND r.operand = 'Q'
+               AND r.is_active = true
+               AND r.description = 'PROVISIONAL (LIS-266): ASTM O-record action code O.12=Q. Not wire-proven — no captured X3 O-record carries this field yet. Shipped active because guarded go-live requires QC config present; the operator QC-review SOP is the compensating control.';
         </sql>
 
         <rollback>
@@ -112,8 +118,12 @@
                   FROM clinlims.analyzer a
                  WHERE r.analyzer_id = a.id
                    AND a.name = 'SNIBE MAGLUMI X3'
+                   AND r.id = '27200000-0000-4000-8000-000000000008'
                    AND r.rule_type = 'FIELD_EQUALS'
-                   AND r.target_field = 'O.12';
+                   AND r.target_field = 'O.12'
+                   AND r.operand = 'Q'
+                   AND r.is_active = false
+                   AND r.description = 'SUPERSEDED by LIS-269 SPECIMEN_ID_PATTERN. Never fired: the X3 O-record has only 5 fields, so O.12 was always absent and QC classified as PATIENT. Deactivated, not deleted, so the change stays auditable.';
             </sql>
         </rollback>
     </changeSet>
