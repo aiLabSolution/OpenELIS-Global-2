@@ -203,11 +203,23 @@ public class MaglumiX3SeedMigrationTest {
                 count("SELECT COUNT(*) FROM clinlims.analyzer_qc_rule r"
                         + " JOIN clinlims.analyzer a ON a.id = r.analyzer_id WHERE a.name = '" + ANALYZER + "'") > 0);
 
+        // LIS-269: the active discriminator is the wire-verified specimen-id pattern.
+        // The X3 wraps QC lot+level in '#' in O-3, e.g. '#24725021Q1#'.
         assertEquals("the QC discriminator must be active, or QC falls through to the patient stream", 1,
                 count("SELECT COUNT(*) FROM clinlims.analyzer_qc_rule r"
                         + " JOIN clinlims.analyzer a ON a.id = r.analyzer_id WHERE a.name = '" + ANALYZER + "'"
-                        + " AND r.rule_type = 'FIELD_EQUALS' AND r.target_field = 'O.12' AND r.operand = 'Q'"
+                        + " AND r.rule_type = 'SPECIMEN_ID_PATTERN' AND r.operand = '^#.+#$'"
                         + " AND r.is_active = true"));
+
+        // LIS-269: the rule it superseded must be present but INACTIVE. It could never
+        // fire -- the X3 O-record carries only five fields, so O.12 was always absent
+        // and every QC row classified as PATIENT. Kept rather than deleted so the
+        // change stays auditable; only ACTIVE rules are pushed to the bridge.
+        assertEquals("the superseded O.12 rule must be deactivated, not left firing or deleted", 1,
+                count("SELECT COUNT(*) FROM clinlims.analyzer_qc_rule r"
+                        + " JOIN clinlims.analyzer a ON a.id = r.analyzer_id WHERE a.name = '" + ANALYZER + "'"
+                        + " AND r.rule_type = 'FIELD_EQUALS' AND r.target_field = 'O.12'"
+                        + " AND r.is_active = false"));
 
         assertEquals("the unconfirmed calibration prefix must stay inactive so it cannot reclassify a patient specimen",
                 1,
@@ -277,7 +289,11 @@ public class MaglumiX3SeedMigrationTest {
         assertEquals(1, count("SELECT COUNT(*) FROM clinlims.analyzer WHERE name = '" + ANALYZER + "'"));
         assertEquals(3, count("SELECT COUNT(*) FROM clinlims.analyzer_test_map m"
                 + " JOIN clinlims.analyzer a ON a.id = m.analyzer_id WHERE a.name = '" + ANALYZER + "'"));
-        assertEquals(2, count("SELECT COUNT(*) FROM clinlims.analyzer_qc_rule r"
+        // LIS-269: three rules now -- the active SPECIMEN_ID_PATTERN discriminator, the
+        // deactivated FIELD_EQUALS(O.12) it superseded, and the inactive calibration
+        // placeholder. Both inserts are NOT-EXISTS-guarded on rule_type, so a re-run
+        // cannot duplicate them.
+        assertEquals(3, count("SELECT COUNT(*) FROM clinlims.analyzer_qc_rule r"
                 + " JOIN clinlims.analyzer a ON a.id = r.analyzer_id WHERE a.name = '" + ANALYZER + "'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinlims.unit_of_measure WHERE name = 'uIU/mL'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinlims.test WHERE loinc = '14928-6'"));

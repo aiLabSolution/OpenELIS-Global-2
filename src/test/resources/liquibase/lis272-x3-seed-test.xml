@@ -298,5 +298,8 @@
 
     <include
         file="liquibase/analyzer/004-015-seed-maglumi-x3-qc-rules.xml" />
+    <!-- LIS-269: must run after 004-015, which seeds the rule it supersedes. -->
+    <include
+        file="liquibase/analyzer/004-016-x3-qc-specimen-id-pattern.xml" />
 
 </databaseChangeLog>
